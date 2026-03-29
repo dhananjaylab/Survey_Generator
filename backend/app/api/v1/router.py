@@ -1,9 +1,10 @@
 import json
 import logging
 from typing import Any
+import threading
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import secrets
 from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
@@ -12,27 +13,15 @@ from app.models.schemas import (
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse
 )
 from app.services.ai_service import AIService
-from app.tasks.survey_tasks import generate_survey_task
+from app.tasks.survey_tasks import async_generate_survey
 from app.core.config import settings
+from app.core.auth import verify_token
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-# Basic Auth
-security = HTTPBasic()
-
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    """Verify HTTP Basic Auth credentials against settings."""
-    correct_username = secrets.compare_digest(credentials.username, settings.BASIC_AUTH_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, settings.BASIC_AUTH_PASSWORD)
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
-
-router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"], dependencies=[Depends(verify_credentials)])
+# JWT-protected router
+router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"], dependencies=[Depends(verify_token)])
 
 @router.post("/business-overview", response_model=BusinessOverviewResponse)
 async def get_business_overview(request: BusinessOverviewRequest):
@@ -109,29 +98,89 @@ async def get_business_research(request: BusinessOverviewRequest):
 
 @router.post("/generate", response_model=SurveyStatusResponse)
 def generate_questionnaire(request: SurveyGenerationRequest, db: Session = Depends(get_db)):
-    print(f"DEBUG: Hitting /generate endpoint with request_id: {request.request_id}")
-    print(f"DEBUG: Using Redis URL: {settings.REDIS_URL}")
-    
-    # Check if request exists
-    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request.request_id).first()
-    
-    if not record:
-        record = SurveyRequestRecord(
-            request_id=request.request_id,
-            project_name=request.project_name,
-            company_name=request.company_name,
-            industry=request.industry,
-            use_case=request.use_case,
-            business_overview=request.business_overview,
-            research_objectives=request.research_objectives,
-            status="STARTING"
-        )
-        db.add(record)
-        db.commit()
-    elif record.status == "COMPLETED":
+    try:
+        # Check if request exists
+        record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request.request_id).first()
+        
+        if not record:
+            # Try to create new record with IntegrityError handling
+            try:
+                record = SurveyRequestRecord(
+                    request_id=request.request_id,
+                    project_name=request.project_name,
+                    company_name=request.company_name,
+                    industry=request.industry,
+                    use_case=request.use_case,
+                    business_overview=request.business_overview,
+                    research_objectives=request.research_objectives,
+                    status="STARTING"
+                )
+                db.add(record)
+                db.commit()
+            except IntegrityError:
+                # Record was created by another request, fetch it
+                db.rollback()
+                record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request.request_id).first()
+                if not record:
+                    raise HTTPException(status_code=500, detail="Failed to retrieve survey request record")
+        
+        # If already completed, return cached result
+        if record.status == "COMPLETED":
+            return SurveyStatusResponse(
+                success=1,
+                status=record.status,
+                request_id=request.request_id,
+                project_name=request.project_name,
+                company_name=request.company_name,
+                research_objectives=request.research_objectives,
+                business_overview=request.business_overview,
+                industry=request.industry,
+                use_case=request.use_case,
+                pages=record.pages,
+                doc_link=record.doc_link
+            )
+        
+        # If already running, just return status
+        if record.status in ["STARTING", "RUNNING"]:
+            return SurveyStatusResponse(
+                success=2,
+                status="RUNNING",
+                request_id=request.request_id,
+                project_name=request.project_name,
+                company_name=request.company_name,
+                research_objectives=request.research_objectives,
+                business_overview=request.business_overview,
+                industry=request.industry,
+                use_case=request.use_case,
+                pages="",
+                doc_link=""
+            )
+        
+        # Launch async task in background thread
+        logger.info(f"Starting background task for request_id: {request.request_id}")
+        
+        def run_task():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(async_generate_survey(
+                    request_id=request.request_id,
+                    data={
+                        "company_name": request.company_name,
+                        "business_overview": request.business_overview,
+                        "research_objectives": request.research_objectives,
+                        "project_name": request.project_name
+                    }
+                ))
+            finally:
+                loop.close()
+        
+        thread = threading.Thread(target=run_task, daemon=True)
+        thread.start()
+        
         return SurveyStatusResponse(
-            success=1,
-            status=record.status,
+            success=2,
+            status="RUNNING",
             request_id=request.request_id,
             project_name=request.project_name,
             company_name=request.company_name,
@@ -139,35 +188,12 @@ def generate_questionnaire(request: SurveyGenerationRequest, db: Session = Depen
             business_overview=request.business_overview,
             industry=request.industry,
             use_case=request.use_case,
-            pages=record.pages,
-            doc_link=record.doc_link
+            pages="",
+            doc_link=""
         )
-    
-    # Launch celery task
-    logger.info(f"Dispatching Celery task tasks.generate_survey for request_id: {request.request_id} using Redis: {settings.REDIS_URL}")
-    generate_survey_task.delay(
-        request_id=request.request_id,
-        data={
-            "company_name": request.company_name,
-            "business_overview": request.business_overview,
-            "research_objectives": request.research_objectives,
-            "project_name": request.project_name
-        }
-    )
-    
-    return SurveyStatusResponse(
-        success=2,
-        status="RUNNING",
-        request_id=request.request_id,
-        project_name=request.project_name,
-        company_name=request.company_name,
-        research_objectives=request.research_objectives,
-        business_overview=request.business_overview,
-        industry=request.industry,
-        use_case=request.use_case,
-        pages="",
-        doc_link=""
-    )
+    except Exception as e:
+        logger.error(f"Error in generate_questionnaire: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status/{request_id}")
 def get_survey_status(request_id: str, db: Session = Depends(get_db)):

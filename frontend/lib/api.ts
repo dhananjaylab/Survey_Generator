@@ -1,8 +1,16 @@
-import { getAuthHeader } from './utils'
+import { getAuthHeader, ensureAuthenticated } from './utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // Ensure authenticated before making request
+  try {
+    await ensureAuthenticated()
+  } catch (error) {
+    console.warn('Authentication warning:', error)
+    // Continue anyway, might have basic auth or other auth method
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {

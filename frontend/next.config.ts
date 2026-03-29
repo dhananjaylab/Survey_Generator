@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  reactCompiler: true,
+  // reactCompiler: true,  // Disabled - requires babel-plugin-react-compiler
   transpilePackages: [
     "survey-core",
     "survey-react-ui",

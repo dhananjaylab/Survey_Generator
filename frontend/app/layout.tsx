@@ -10,6 +10,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+      </head>
       <body className="antialiased">
         {/* Floating background orbs */}
         <div className="floating-orb" style={{ width: 600, height: 600, top: '-10%', left: '-5%', background: '#6366f1' }} />

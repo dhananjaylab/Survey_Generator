@@ -17,10 +17,15 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 async def publish_progress(request_id: str, message: str):
-    logger.info(message)
-    r = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    await r.publish(f"survey_progress_{request_id}", message)
-    await r.close()
+    """Publish progress message to Redis (non-blocking if connection fails)."""
+    logger.info(f"[{request_id}] {message}")
+    try:
+        r = await asyncio.wait_for(aioredis.from_url(settings.REDIS_URL, decode_responses=True), timeout=2.0)
+        await r.publish(f"survey_progress_{request_id}", message)
+        await r.close()
+    except (asyncio.TimeoutError, Exception) as e:
+        # Log but don't fail - Redis is optional for development
+        logger.debug(f"Redis publish failed (non-blocking): {type(e).__name__}: {e}")
 
 def update_survey_status(request_id: str, status: str, pages=None, questionnaire_data=None, doc_link=None):
     db = SessionLocal()

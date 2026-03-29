@@ -10,6 +10,21 @@ export function generateRequestId(): string {
 }
 
 export function getAuthHeader(): string {
+  // Try to get JWT token from localStorage
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('survey_token')
+    if (token) {
+      return `Bearer ${token}`
+    }
+  }
+  
+  // Fallback to environment variables (for server-side rendering)
+  const token = process.env.NEXT_PUBLIC_JWT_TOKEN
+  if (token) {
+    return `Bearer ${token}`
+  }
+  
+  // Final fallback to Basic Auth headers if available
   const username = process.env.NEXT_PUBLIC_API_USERNAME ?? 'admin'
   const password = process.env.NEXT_PUBLIC_API_PASSWORD ?? 'surveygen2024'
   const encoded =
@@ -18,3 +33,36 @@ export function getAuthHeader(): string {
       : Buffer.from(`${username}:${password}`).toString('base64')
   return `Basic ${encoded}`
 }
+
+export async function ensureAuthenticated(): Promise<string> {
+  // Check if token exists
+  if (typeof window !== 'undefined') {
+    let token = localStorage.getItem('survey_token')
+    if (token) {
+      return token
+    }
+    
+    // If no token, get one from login endpoint
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'default', password: 'default' }),
+      })
+      if (!res.ok) throw new Error('Login failed')
+      const data = await res.json()
+      token = data.access_token
+      if (token) {
+        localStorage.setItem('survey_token', token)
+        return token
+      }
+      throw new Error('No access token in response')
+    } catch (error) {
+      console.error('Failed to authenticate', error)
+      throw error
+    }
+  }
+  
+  return ''
+}
+

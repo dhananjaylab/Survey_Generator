@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Survey Generator API"
+    SECRET_KEY: str = "your-secret-key-change-in-production"  # Change in production!
     BASIC_AUTH_USERNAME: str = "admin"
     BASIC_AUTH_PASSWORD: str = "surveygen2024"
     OPENAI_API_KEY: str

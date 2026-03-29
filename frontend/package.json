@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -31,7 +32,10 @@
     "survey-react-ui": "^2.5.17",
     "tailwind-merge": "^3.5.0",
     "uuid": "^13.0.0",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.12",
+    "axios": "^1.6.5",
+    "docx": "^8.5.0",
+    "html2pdf.js": "^0.10.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
