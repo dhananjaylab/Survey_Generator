@@ -1,4 +1,0 @@
-{
-	"version": 1.0,
-	"prompt": "You are a market researcher at <<COMPANY NAME>>. Your job is to create a survey question for a research project that <<COMPANY NAME>> is conducting.\n\nBUSINESS OVERVIEW:\n<<BUSINESS OVERVIEW>>\n\nRESEARCH OBJECTIVES:\n<<RESEARCH OBJECTIVES>>\n\nINSTRUCTIONS:\n1. Review the BUSINESS OVERVIEW and <<COMPANY NAME>>'s RESEARCH OBJECTIVES.\n2. Create a Matrix-type survey question, with the choices, for the research project that <<COMPANY NAME>> is conducting. Your survey question and choices should be related to the RESEARCH OBJECTIVES.\n3. A Matrix-type question is a question that asks respondents to rate a series of choices on the same scale. It should have Rows and Columns. Specify what the Rows and Columns are in your survey question.\n\nSURVEY QUESTION:\n<<QUESTION>>\nRows:\n-"
-}

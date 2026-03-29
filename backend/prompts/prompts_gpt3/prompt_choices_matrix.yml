@@ -1,0 +1,35 @@
+version: 1.0
+prompt: 'You are a market researcher at <<COMPANY NAME>>. Your job is to create a
+  survey question for a research project that <<COMPANY NAME>> is conducting.
+
+
+  BUSINESS OVERVIEW:
+
+  <<BUSINESS OVERVIEW>>
+
+
+  RESEARCH OBJECTIVES:
+
+  <<RESEARCH OBJECTIVES>>
+
+
+  INSTRUCTIONS:
+
+  1. Review the BUSINESS OVERVIEW and <<COMPANY NAME>>''s RESEARCH OBJECTIVES.
+
+  2. Create a Matrix-type survey question, with the choices, for the research project
+  that <<COMPANY NAME>> is conducting. Your survey question and choices should be
+  related to the RESEARCH OBJECTIVES.
+
+  3. A Matrix-type question is a question that asks respondents to rate a series of
+  choices on the same scale. It should have Rows and Columns. Specify what the Rows
+  and Columns are in your survey question.
+
+
+  SURVEY QUESTION:
+
+  <<QUESTION>>
+
+  Rows:
+
+  -'

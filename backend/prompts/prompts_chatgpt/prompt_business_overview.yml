@@ -1,0 +1,19 @@
+version: 2.0
+messages:
+- role: system
+  content: You are expert in generating business overview based on company name
+- role: user
+  content: 'Amazon is an e-commerce platform where customers can purchase anything.
+    They offer an Amazon Prime subscription service that unlocks additional perks
+    for customers.
+
+
+    Moet Hennessey is a company that makes luxury, ultra-premium alcohol, and alcoholic
+    beverages. Some of their brands are Hennessy, Dom Perignon, and Veuve Clicquot.
+
+
+    Nike is a sportswear and equipment company. They produce apparel, footwear, and
+    equipment for a variety of sports.
+
+
+    <<COMPANY NAME>> is'
