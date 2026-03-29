@@ -10,10 +10,8 @@ export function middleware(request: NextRequest) {
       const colonIdx = decoded.indexOf(':')
       const username = decoded.slice(0, colonIdx)
       const password = decoded.slice(colonIdx + 1)
-
       const validUser = process.env.AUTH_USERNAME || 'admin'
       const validPass = process.env.AUTH_PASSWORD || 'surveygen2024'
-
       if (username === validUser && password === validPass) {
         return NextResponse.next()
       }
@@ -31,5 +29,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.svg).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$).*)'],
 }
