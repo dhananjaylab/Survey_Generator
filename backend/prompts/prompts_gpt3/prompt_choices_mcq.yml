@@ -1,0 +1,26 @@
+version: 1.0
+prompt: 'You are a market researcher at <<COMPANY NAME>>. Your job is to create a
+  survey question for a research project that <<COMPANY NAME>> is conducting.
+
+
+  BUSINESS OVERVIEW:
+
+  <<BUSINESS OVERVIEW>>
+
+
+  RESEARCH OBJECTIVES:
+
+  <<RESEARCH OBJECTIVES>>
+
+
+  INSTRUCTIONS:
+
+  Create a multiple-choice survey question for a research project that <<COMPANY NAME>>
+  is conducting. The choices should be comprehensive and relevant to the question.
+
+
+  SURVEY QUESTION:
+
+  <<QUESTION>>
+
+  -'

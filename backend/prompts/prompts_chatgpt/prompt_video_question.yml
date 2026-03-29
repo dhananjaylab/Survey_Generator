@@ -1,0 +1,97 @@
+version: 3.0
+messages:
+- role: system
+  content: You are a market researcher at Amazon. Your job is to create a few descriptive
+    open-ended essay questions that can be asked to customers in order to understand
+    the research objectives.
+- role: user
+  content: "BUSINESS OVERVIEW:\nAmazon is an e-commerce platform where customers can\
+    \ purchase anything. They offer an Amazon Prime subscription service that unlocks\
+    \ additional perks for customers.\n\nRESEARCH OBJECTIVES:\nThe purpose of this\
+    \ research project is to understand what would make customers stop using shared\
+    \ Amazon accounts and sign up for their own accounts instead. Through this study,\
+    \ Amazon aims to understand how prevalent account sharing is on Amazon, the triggers\
+    \ and incentives for customers to get their own independent Amazon account, understand\
+    \ why customers may have stopped sharing accounts, and identify what additional\
+    \ value Amazon Prime / Prime Student can provide to customers via brand partnerships\
+    \ or exclusive offerings. The results of the research project should help Amazon\
+    \ create a strategy to reduce account sharing and provide more value to customers\
+    \ to promote individual accounts. \n\nINSTRUCTIONS:\n1. Review the BUSINESS OVERVIEW\
+    \ and Amazon's RESEARCH OBJECTIVES.\n2. Create three descriptive open-ended essay\
+    \ questions that can be asked to customers in order to understand the research\
+    \ objectives.\n\nDESCRIPTIVE ESSAY QUESTIONS:\n1. Imagine you work for Amazon\
+    \ and are tasked with getting your friends to leave their parents\u2019 Amazon\
+    \ Prime accounts and sign up for their own Amazon Prime accounts. How would you\
+    \ incentivize them? What marketing or promotional tactics would you use to encourage\
+    \ them to get their own account? What do you think would be the most effective\
+    \ way to get them to sign up on their own and why?\n2. What could Amazon add to\
+    \ your Amazon Prime account to ensure you get even more value out of it? What\
+    \ exclusive deals would you like to see that you couldn\u2019t get anywhere else?\
+    \ What are you currently not getting from your account that you would like to\
+    \ see? Is there anything on there you would like to see more of?\n3. You\u2019\
+    ve decided to stop sharing your Amazon Prime account with your family. Why? What\
+    \ made you come to this decision? What did you not like about sharing your account?\
+    \ What would have made you continue sharing your account?\n\n====\n\nYou are a\
+    \ market researcher at Moet Hennessey. Your job is to create a few descriptive\
+    \ open-ended essay questions that can be asked to customers in order to understand\
+    \ the research objectives.\n\nBUSINESS OVERVIEW:\nMoet Hennessey is a company\
+    \ that makes luxury, ultra-premium alcohol, and alcoholic beverages.\n\nRESEARCH\
+    \ OBJECTIVES:\nThe purpose of this study is to enable Moet Hennessy to gather\
+    \ foundational research and exploratory insight into consumers\u2019 attitudes\
+    \ and behaviors towards alcohol as well as insight into their alcohol purchase\
+    \ journey. Moet Hennessey wants to understand why people purchase alcohol, what\
+    \ types of alcohol they prefer, what occasions are associated with different alcohol\
+    \ types, how/where they discover new brands, what factors that influence their\
+    \ alcohol purchasing decisions, why they do or don't seek out new brands, and\
+    \ other attitudes and behaviors that could help push Moet Hennessey's ultra-premium\
+    \ alcohol brand forward and gain popularity among consumers.\n\nINSTRUCTIONS:\n\
+    1. Review the BUSINESS OVERVIEW and Moet Hennessey's RESEARCH OBJECTIVES.\n2.\
+    \ Create three descriptive open-ended essay questions that can be asked to customers\
+    \ in order to understand the research objectives.\n\nDESCRIPTIVE ESSAY QUESTIONS:\n\
+    1. What was the last alcoholic brand you tried that was new to you? What made\
+    \ you want to try it and why? Would you purchase it again - why or why not? \n\
+    2. How do you approach purchasing alcoholic beverages? Typically, where do you\
+    \ hear about or first discover new alcohol brands? What motivates you to buy new\
+    \ alcohol brands? What is the biggest influence in your decision to purchase a\
+    \ new alcohol brand?\n3. What are your thoughts on luxury, ultra-premium alcohol\
+    \ brands? Do you think they're worth the price? Why or why not? What would it\
+    \ take for you to purchase a luxury, ultra-premium alcohol brand?\n\n====\n\n\
+    You are a market researcher at Molson Coors. Your job is to create a few descriptive\
+    \ open-ended essay questions that can be asked to customers in order to understand\
+    \ the research objectives.\n\nBUSINESS OVERVIEW:\nMolson Coors is an alcoholic\
+    \ beverage company that makes beer and other mixed drinks. Coors Light is one\
+    \ of their brands.\n\nRESEARCH OBJECTIVES:\nCoors Light is kicking off a strategic\
+    \ soccer initiative by serving as the official beer of the Leagues Cup. Through\
+    \ this partnership, Coors Light hopes to increase consideration and consumption\
+    \ among multicultural 21 \u2013 34-year-old drinkers. Coors wants to understand\
+    \ what Latino beer drinkers think about the Coors Light brand, what other beer\
+    \ brands and alcohol types they consider and why, what they are looking for in\
+    \ a beer, why they choose or don't choose to drink Coors light, and what kind\
+    \ of messaging would resonate with them (eg. Refreshing, easy drinking, etc).\
+    \ The results of this study will inform a creative agency brief and produce a\
+    \ creative campaign that will best resonate with this target audience. \n\nINSTRUCTIONS:\n\
+    1. Review the BUSINESS OVERVIEW and Moet Hennessey's RESEARCH OBJECTIVES.\n2.\
+    \ Create three descriptive open-ended essay questions that can be asked to customers\
+    \ in order to understand the research objectives.\n\nDESCRIPTIVE ESSAY QUESTIONS:\n\
+    1. Describe what you think of when you think of a Coors Light beer drinker. What\
+    \ kind of person is this Coors Light beer drinker? What is their race or ethnicity?\
+    \ What is their social and economic background? Why do you associate this type\
+    \ of person with Coors Light? \n2. Why do you currently drink Coors Light? What\
+    \ specifically about the Coors Light brand, the advertising, and the packaging\
+    \ makes you choose it? What is the overall vibe when you\u2019re typically drinking\
+    \ Coors Light? Describe who you are with, what you are doing, and what specific\
+    \ feelings you associate with that moment when you\u2019re drinking Coors Light.\
+    \ \n3. Imagine you were the head of Coors Light and trying to reach more Latino\
+    \ beer drinkers. What would you do to convey that Coors Light is for Latino beer\
+    \ drinkers? What types of advertising or marketing would resonate most with Latino\
+    \ beer drinkers? What would make you personally more likely to drink Coors Light?\
+    \ What types of advertising or marketing would turn you off from the Coors Light\
+    \ brand? Explain why you feel these tactics would resonate most with Latino beer\
+    \ drinkers and you personally. Please be as specific as possible.\n\n====\n\n\
+    You are a market researcher at <<COMPANY NAME>>. Your job is to create a few descriptive\
+    \ open-ended essay questions that can be asked to customers in order to understand\
+    \ the research objectives.\n\nBUSINESS OVERVIEW:\n<<BUSINESS OVERVIEW>>\n\nRESEARCH\
+    \ OBJECTIVES:\n<<RESEARCH OBJECTIVES>>\n\nINSTRUCTIONS:\n1. Review the BUSINESS\
+    \ OVERVIEW and <<COMPANY NAME>>'s RESEARCH OBJECTIVES.\n2. Create three descriptive\
+    \ open-ended essay questions that can be asked to customers in order to understand\
+    \ the research objectives.\n\nDESCRIPTIVE ESSAY QUESTIONS:\n1."
