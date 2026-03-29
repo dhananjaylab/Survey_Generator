@@ -1,8 +1,10 @@
 import json
 import logging
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
+import secrets
 from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (
@@ -15,7 +17,22 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"])
+# Basic Auth
+security = HTTPBasic()
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify HTTP Basic Auth credentials against settings."""
+    correct_username = secrets.compare_digest(credentials.username, settings.BASIC_AUTH_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, settings.BASIC_AUTH_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"], dependencies=[Depends(verify_credentials)])
 
 @router.post("/business-overview", response_model=BusinessOverviewResponse)
 async def get_business_overview(request: BusinessOverviewRequest):
@@ -151,3 +168,24 @@ def generate_questionnaire(request: SurveyGenerationRequest, db: Session = Depen
         pages="",
         doc_link=""
     )
+
+@router.get("/status/{request_id}")
+def get_survey_status(request_id: str, db: Session = Depends(get_db)):
+    """Poll the status of a survey generation task without re-POSTing."""
+    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Survey request '{request_id}' not found.")
+    
+    return {
+        "success": 1 if record.status == "COMPLETED" else 2,
+        "status": record.status,
+        "request_id": record.request_id,
+        "project_name": record.project_name,
+        "company_name": record.company_name,
+        "industry": record.industry,
+        "use_case": record.use_case,
+        "business_overview": record.business_overview or "",
+        "research_objectives": record.research_objectives or "",
+        "pages": record.pages or "",
+        "doc_link": record.doc_link or "",
+    }

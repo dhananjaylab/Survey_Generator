@@ -3,6 +3,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Survey Generator API"
+    BASIC_AUTH_USERNAME: str = "admin"
+    BASIC_AUTH_PASSWORD: str = "surveygen2024"
     OPENAI_API_KEY: str
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"

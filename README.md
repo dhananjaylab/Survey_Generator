@@ -44,3 +44,4 @@ AI Survey Generator is a powerful tool that automates the creation of survey que
 *   **💯 Easy to Use:** User-friendly web interface and straightforward API access for all users.
 
 ---
+ celery -A app.core.celery worker --loglevel=info --pool=solo
