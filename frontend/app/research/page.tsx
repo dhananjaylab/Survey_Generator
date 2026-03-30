@@ -42,6 +42,7 @@ export default function ResearchObjectivesStep() {
         business_overview: editableOverview,
         industry: wizardData.industry,
         use_case: wizardData.useCase,
+        llm_model: wizardData.selectedLLM || 'gpt',
       })
 
       setData({

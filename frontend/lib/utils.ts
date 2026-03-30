@@ -34,15 +34,29 @@ export function getAuthHeader(): string {
   return `Basic ${encoded}`
 }
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return true
+    const payload = JSON.parse(atob(parts[1]))
+    return payload.exp * 1000 < Date.now()
+  } catch {
+    return true // Invalid token = expired
+  }
+}
+
 export async function ensureAuthenticated(): Promise<string> {
-  // Check if token exists
+  // Check if token exists and is not expired
   if (typeof window !== 'undefined') {
     let token = localStorage.getItem('survey_token')
-    if (token) {
+    if (token && !isTokenExpired(token)) {
       return token
     }
     
-    // If no token, get one from login endpoint
+    // Clear invalid/expired token
+    localStorage.removeItem('survey_token')
+    
+    // Get a new token from login endpoint
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/login`, {
         method: 'POST',

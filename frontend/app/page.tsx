@@ -42,6 +42,7 @@ export default function ProjectDetailsStep() {
     useCase: wizardData.useCase || '',
   })
 
+  const [selectedLLM, setSelectedLLM] = useState(wizardData.selectedLLM || 'gpt')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -64,15 +65,17 @@ export default function ProjectDetailsStep() {
         projectName: formData.projectName,
         industry: formData.industry,
         useCase: formData.useCase,
+        selectedLLM: selectedLLM,
       })
 
-      // Generate business overview
+      // Generate business overview with selected LLM
       const response = await api.getBusinessResearch({
         request_id: requestId,
         project_name: formData.projectName,
         company_name: formData.companyName,
         industry: formData.industry,
         use_case: formData.useCase,
+        llm_model: selectedLLM,
       })
 
       setData({
@@ -165,6 +168,44 @@ export default function ProjectDetailsStep() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* LLM Model Selection */}
+            <div className="bg-gradient-to-r from-violet-500/10 to-indigo-500/10 border border-violet-500/30 rounded-lg p-4">
+              <label className="field-label">AI Model</label>
+              <p className="text-gray-400 text-sm mb-3">Choose which AI model to use for generating your survey:</p>
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer p-3 rounded border border-violet-500/20 hover:bg-violet-500/5 transition">
+                  <input
+                    type="radio"
+                    name="llm-model"
+                    value="gpt"
+                    checked={selectedLLM === 'gpt'}
+                    onChange={(e) => setSelectedLLM(e.target.value)}
+                    disabled={loading}
+                    className="w-4 h-4"
+                  />
+                  <div>
+                    <span className="font-semibold text-white">GPT-4O Mini (OpenAI)</span>
+                    <p className="text-xs text-gray-500">Fastest & most cost-effective model</p>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer p-3 rounded border border-violet-500/20 hover:bg-violet-500/5 transition">
+                  <input
+                    type="radio"
+                    name="llm-model"
+                    value="gemini"
+                    checked={selectedLLM === 'gemini'}
+                    onChange={(e) => setSelectedLLM(e.target.value)}
+                    disabled={loading}
+                    className="w-4 h-4"
+                  />
+                  <div>
+                    <span className="font-semibold text-white">Gemini 2.0 Flash (Google)</span>
+                    <p className="text-xs text-gray-500">Latest multimodal capabilities</p>
+                  </div>
+                </label>
+              </div>
             </div>
 
             {error && <div className="text-red-400 text-sm bg-red-900/20 p-3 rounded">{error}</div>}

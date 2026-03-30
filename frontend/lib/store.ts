@@ -12,6 +12,7 @@ export interface WizardData {
   surveyPages: any[]
   docLink: string
   generationStatus: string
+  selectedLLM: string
 }
 
 interface WizardStore extends WizardData {
@@ -30,6 +31,7 @@ const initialState: WizardData = {
   surveyPages: [],
   docLink: '',
   generationStatus: '',
+  selectedLLM: 'gpt',
 }
 
 export const useWizardStore = create<WizardStore>()(
