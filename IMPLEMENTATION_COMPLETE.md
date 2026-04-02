@@ -81,6 +81,8 @@ pip install -r requirements.txt
 
 # Start FastAPI server
 uvicorn app.main:app --reload
+
+celery -A app.core.celery worker --loglevel=info --pool=solo
 ```
 
 Backend will be at: `http://localhost:8000`
