@@ -220,106 +220,42 @@ def generate_questionnaire(request: Request, req: SurveyGenerationRequest, db: S
         metrics.record_survey_failed()
         metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=500, detail=str(e))
-        
-        if not record:
-            # Try to create new record with IntegrityError handling
-            try:
-                record = SurveyRequestRecord(
-                    request_id=request.request_id,
-                    project_name=request.project_name,
-                    company_name=request.company_name,
-                    industry=request.industry,
-                    use_case=request.use_case,
-                    business_overview=request.business_overview,
-                    research_objectives=request.research_objectives,
-                    status="STARTING"
-                )
-                db.add(record)
-                db.commit()
-            except IntegrityError:
-                # Record was created by another request, fetch it
-                db.rollback()
-                record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request.request_id).first()
-                if not record:
-                    raise HTTPException(status_code=500, detail="Failed to retrieve survey request record")
-        
-        # If already completed, return cached result
-        if record.status == "COMPLETED":
-            logger.info(f"[{request.request_id}] Returning cached completed survey")
-            return SurveyStatusResponse(
-                success=1,
-                status=record.status,
-                request_id=request.request_id,
-                project_name=request.project_name,
-                company_name=request.company_name,
-                research_objectives=request.research_objectives,
-                business_overview=request.business_overview,
-                industry=request.industry,
-                use_case=request.use_case,
-                pages=record.pages,
-                doc_link=record.doc_link
-            )
-        
-        # If already running, just return status (but NOT if STARTING - those need the thread launched)
-        if record.status == "RUNNING":
-            logger.info(f"[{request.request_id}] Survey generation already in progress, returning status")
-            return SurveyStatusResponse(
-                success=2,
-                status="RUNNING",
-                request_id=request.request_id,
-                project_name=request.project_name,
-                company_name=request.company_name,
-                research_objectives=request.research_objectives,
-                business_overview=request.business_overview,
-                industry=request.industry,
-                use_case=request.use_case,
-                pages="",
-                doc_link=""
-            )
-        
-        # Delegate to Celery task (non-blocking)
-        logger.info(f"[{request.request_id}] Delegating to Celery task queue")
-        from app.tasks.survey_tasks import generate_survey_task
-        
-        task = generate_survey_task.delay(
-            request_id=request.request_id,
-            data={
-                "company_name": request.company_name,
-                "business_overview": request.business_overview,
-                "research_objectives": request.research_objectives,
-                "project_name": request.project_name
-            },
-            llm_model=request.llm_model
-        )
-        
-        logger.info(f"[{request.request_id}] Celery task queued with ID: {task.id}")
-        
-        return SurveyStatusResponse(
-            success=2,
-            status="RUNNING",
-            request_id=request.request_id,
-            project_name=request.project_name,
-            company_name=request.company_name,
-            research_objectives=request.research_objectives,
-            business_overview=request.business_overview,
-            industry=request.industry,
-            use_case=request.use_case,
-            pages="",
-            doc_link=""
-        )
-    except Exception as e:
-        logger.error(f"[{request.request_id}] Error in generate_questionnaire: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status/{request_id}")
+@limiter.limit("30/minute")
 def get_survey_status(request_id: str, db: Session = Depends(get_db)):
-    """Poll the status of a survey generation task without re-POSTing."""
+    """
+    Poll the status of a survey generation task.
+    
+    **Rate Limits:**
+    - 30 requests/minute per IP address
+    
+    **Path Parameters:**
+    - `request_id` (string, required): The request ID from the survey generation request
+    
+    **Response:**
+    - `success` (integer): 1 if completed, 2 if still running
+    - `status` (string): Current status (STARTING, RUNNING, COMPLETED, FAILED)
+    - `request_id` (string): The request ID
+    - `pages` (string): Generated survey pages (empty if still running)
+    - `doc_link` (string): Link to generated document (empty if still running)
+    
+    **Error Responses:**
+    - 404: Survey request not found
+    - 429: Rate limit exceeded (30 requests/minute per IP)
+    
+    **Example:**
+    ```bash
+    curl -H "Authorization: Bearer <token>" \\
+      "http://localhost:8000/api/v1/surveys/status/req-12345"
+    ```
+    """
     record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request_id).first()
     if not record:
-        logger.warning(f"[{request_id}] Survey request not found")
+        logger.warning("survey_request_not_found", request_id=request_id)
         raise HTTPException(status_code=404, detail=f"Survey request '{request_id}' not found.")
     
-    logger.info(f"[{request_id}] GET /status - Current status: {record.status}")
+    logger.info("survey_status_polled", request_id=request_id, status=record.status)
     
     return {
         "success": 1 if record.status == "COMPLETED" else 2,

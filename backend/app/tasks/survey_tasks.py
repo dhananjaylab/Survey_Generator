@@ -31,7 +31,7 @@ async def publish_progress(request_id: str, message: str):
         r = await asyncio.wait_for(aioredis.from_url(settings.REDIS_URL, decode_responses=True), timeout=2.0)
         await r.publish(f"survey_progress_{request_id}", message)
         await r.close()
-    except (asyncio.TimeoutError, Exception) as e:
+    except (asyncio.TimeoutError, ConnectionError) as e:
         # Log but don't fail - Redis is optional for development
         logger.debug("redis_publish_failed", request_id=request_id, error=str(e))
 
@@ -175,7 +175,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                 company_name, business_overview, research_objectives
             )
             step_time = time.time() - step_start
-            logger.info(f"[{request_id}] STEP 4 - Video questions generated ({step_time:.2f}s)")
+            logger.info("video_questions_generated", request_id=request_id, elapsed_seconds=step_time)
             
             for vq in video_questions:
                 questions_with_choices.append({
@@ -195,7 +195,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                 seen.add(qt)
                 final_questions.append(q)
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 5 - Filtering complete ({step_time:.2f}s) - Final questions: {len(final_questions)}")
+        logger.info("filtering_complete", request_id=request_id, elapsed_seconds=step_time, final_question_count=len(final_questions))
 
         # STEP 6: Document Building
         step_start = time.time()
@@ -206,11 +206,11 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         template_path = assets_dir / "template_new.docx"
         
         if not template_path.exists():
-            logger.error(f"[{request_id}] Template not found at {template_path}. Falling back to blank document.")
+            logger.error("template_not_found", request_id=request_id, template_path=str(template_path))
             doc = Document()
             doc.add_heading(project_name, 0)
         else:
-            logger.info(f"[{request_id}] Using template: {template_path}")
+            logger.info("using_template", request_id=request_id, template_path=str(template_path))
             doc = Document(str(template_path))
 
         # Dynamic template population
@@ -236,7 +236,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                     # Fallback to defaults if parsing failed
                     rows = ['Item 1', 'Item 2', 'Item 3']
                     cols = ['Poor', 'Average', 'Good', 'Excellent']
-                    logger.warning(f"[{request_id}] Matrix question {i} had invalid choices, using defaults")
+                    logger.warning("matrix_question_invalid_choices", request_id=request_id, question_index=i)
                 
                 doc.add_paragraph("Rows:", style='List Bullet 2')
                 for row in rows:
@@ -259,7 +259,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         doc.save(str(output_path))
         
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 6 - DOCX file created ({step_time:.2f}s)")
+        logger.info("docx_file_created", request_id=request_id, elapsed_seconds=step_time)
         
         # STEP 7: SurveyJS Build
         step_start = time.time()
@@ -276,7 +276,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                 pages.append({"name": f"page{page_idx}", "elements": [{"type": "videofeedback", "name": f"question{page_idx}", "title": f"<p>{q['question']}</p>", "surveyQID": str(uuid.uuid1())}]})
         
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 7 - SurveyJS pages built ({step_time:.2f}s)")
+        logger.info("surveyjs_pages_built", request_id=request_id, elapsed_seconds=step_time)
                 
         # STEP 8: Upload to Storage
         step_start = time.time()
@@ -287,13 +287,13 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         
         if r2_url:
             doc_link = r2_url
-            logger.info(f"[{request_id}] File uploaded to R2: {r2_url}")
+            logger.info("file_uploaded_to_r2", request_id=request_id, url=r2_url)
         else:
-            logger.warning(f"[{request_id}] R2 upload failed, falling back to local doc_link")
+            logger.warning("r2_upload_failed_using_local_fallback", request_id=request_id)
             doc_link = f"/api/v1/files/download/{filename}"
         
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 8 - File uploaded ({step_time:.2f}s)")
+        logger.info("file_uploaded", request_id=request_id, elapsed_seconds=step_time)
             
         # Update status to COMPLETED
         update_survey_status(request_id, "COMPLETED", pages=pages, questionnaire_data=final_questions, doc_link=doc_link)

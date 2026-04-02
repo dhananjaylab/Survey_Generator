@@ -1,12 +1,14 @@
 import logging
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.metrics import get_metrics_collector
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
+from app.core.auth import verify_token
 from slowapi.errors import RateLimitExceeded
 from app.api.v1 import router, files, websockets, auth
 from app.models.database import engine, Base
@@ -145,6 +147,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def custom_openapi():
+    """
+    Custom OpenAPI schema with JWT Bearer authentication.
+    
+    Adds security scheme and applies it globally to all endpoints
+    except /api/v1/auth/login and /api/v1/auth/register.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title="AI Survey Generator API",
+        version="1.0.0",
+        description=description,
+        routes=app.routes,
+    )
+    
+    # Add JWT Bearer security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT Bearer token for API authentication. Obtain a token from /api/v1/auth/login"
+        }
+    }
+    
+    # Apply security globally to all endpoints except login and register
+    public_endpoints = [
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/health",
+        "/health/detailed",
+        "/metrics",
+        "/"
+    ]
+    
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        # Skip public endpoints
+        if path in public_endpoints:
+            continue
+        
+        # Apply security to all methods in this path
+        for method in path_item:
+            if method in ["get", "post", "put", "delete", "patch", "options", "head", "trace"]:
+                if method in path_item:
+                    path_item[method]["security"] = [{"BearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+# Set custom OpenAPI schema
+app.openapi = custom_openapi
 
 app.include_router(router.router)
 app.include_router(files.router)
