@@ -1,7 +1,6 @@
 import json
 import logging
 from typing import Any
-import threading
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -13,12 +12,14 @@ from app.models.schemas import (
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse
 )
 from app.services.ai_service import AIService
-from app.tasks.survey_tasks import async_generate_survey, update_survey_status
+from app.tasks.survey_tasks import update_survey_status
 from app.core.config import settings
 from app.core.auth import verify_token
-import asyncio
+from app.core.logging import get_logger
+from app.core.metrics import get_metrics_collector
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+metrics = get_metrics_collector()
 
 # JWT-protected router
 router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"], dependencies=[Depends(verify_token)])
@@ -171,43 +172,22 @@ def generate_questionnaire(request: SurveyGenerationRequest, db: Session = Depen
                 doc_link=""
             )
         
-        # Launch async task in background thread
-        logger.info(f"[{request.request_id}] ✓ Status is {record.status}, proceeding to launch background thread")
-        logger.info(f"[{request.request_id}] Starting background task synchronously...")
+        # Delegate to Celery task (non-blocking)
+        logger.info(f"[{request.request_id}] Delegating to Celery task queue")
+        from app.tasks.survey_tasks import generate_survey_task
         
-        def run_task():
-            logger.info(f"[{request.request_id}] Background thread started, setting up event loop...")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                logger.info(f"[{request.request_id}] Calling async_generate_survey()...")
-                loop.run_until_complete(async_generate_survey(
-                    request_id=request.request_id,
-                    llm_model=request.llm_model,
-                    data={
-                        "company_name": request.company_name,
-                        "business_overview": request.business_overview,
-                        "research_objectives": request.research_objectives,
-                        "project_name": request.project_name
-                    }
-                ))
-                logger.info(f"[{request.request_id}] async_generate_survey() completed successfully")
-            except Exception as e:
-                logger.error(f"[{request.request_id}] ✗ Background thread FAILED: {str(e)}", exc_info=True)
-                # Try to update status to FAILED
-                try:
-                    update_survey_status(request.request_id, "FAILED")
-                    logger.error(f"[{request.request_id}] Status updated to FAILED")
-                except Exception as update_error:
-                    logger.error(f"[{request.request_id}] Failed to update status: {update_error}")
-            finally:
-                loop.close()
-                logger.info(f"[{request.request_id}] Event loop closed")
+        task = generate_survey_task.delay(
+            request_id=request.request_id,
+            data={
+                "company_name": request.company_name,
+                "business_overview": request.business_overview,
+                "research_objectives": request.research_objectives,
+                "project_name": request.project_name
+            },
+            llm_model=request.llm_model
+        )
         
-        thread = threading.Thread(target=run_task, daemon=True, name=f"survey-{request.request_id}")
-        logger.info(f"[{request.request_id}] Thread object created: {thread.name}, is_alive={thread.is_alive()}")
-        thread.start()
-        logger.info(f"[{request.request_id}] Thread started successfully, is_alive={thread.is_alive()}")
+        logger.info(f"[{request.request_id}] Celery task queued with ID: {task.id}")
         
         return SurveyStatusResponse(
             success=2,

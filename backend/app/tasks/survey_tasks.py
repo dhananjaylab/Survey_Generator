@@ -6,6 +6,7 @@ from typing import Dict, Any
 from celery import Task
 import asyncio
 from app.core.celery import celery_app
+from app.core.logging import get_logger
 from app.models.database import SessionLocal
 from app.models.survey import SurveyRequestRecord
 from app.services.ai_service import AIService
@@ -15,20 +16,36 @@ from docx import Document
 import os
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 async def publish_progress(request_id: str, message: str):
-    """Publish progress message to Redis (non-blocking if connection fails)."""
-    logger.info(f"[{request_id}] {message}")
+    """
+    Publish progress message to Redis pub/sub channel.
+    
+    Args:
+        request_id: Unique request identifier
+        message: Progress message to publish
+    """
+    logger.info("progress_update", request_id=request_id, message=message)
     try:
         r = await asyncio.wait_for(aioredis.from_url(settings.REDIS_URL, decode_responses=True), timeout=2.0)
         await r.publish(f"survey_progress_{request_id}", message)
         await r.close()
     except (asyncio.TimeoutError, Exception) as e:
         # Log but don't fail - Redis is optional for development
-        logger.debug(f"Redis publish failed (non-blocking): {type(e).__name__}: {e}")
+        logger.debug("redis_publish_failed", request_id=request_id, error=str(e))
 
 def update_survey_status(request_id: str, status: str, pages=None, questionnaire_data=None, doc_link=None):
+    """
+    Update survey request status in database.
+    
+    Args:
+        request_id: Unique request identifier
+        status: New status (STARTING, RUNNING, COMPLETED, FAILED)
+        pages: Generated survey pages (SurveyJS format)
+        questionnaire_data: Raw question data
+        doc_link: URL to generated DOCX file
+    """
     db = SessionLocal()
     try:
         record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request_id).first()
@@ -38,22 +55,47 @@ def update_survey_status(request_id: str, status: str, pages=None, questionnaire
             if questionnaire_data is not None: record.questionnaire_data = questionnaire_data
             if doc_link is not None: record.doc_link = doc_link
             db.commit()
+            logger.info("survey_status_updated", request_id=request_id, status=status)
     except Exception as e:
-        logger.error(f"Error updating DB: {e}")
+        logger.error("survey_status_update_failed", request_id=request_id, error=str(e))
         db.rollback()
     finally:
         db.close()
 
 async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model: str = "gpt"):
-    logger.info(f"[{request_id}] Task STARTED with model: {llm_model}")
+    """
+    Asynchronous survey generation logic.
+    
+    Responsibilities:
+    - Initialize AIService
+    - Generate questions and choices
+    - Save results to DB
+    - Update status: RUNNING → COMPLETED (or FAILED on error)
+    - Publish progress updates to Redis pub/sub
+    
+    Progress Messages:
+    - "STARTED": Task initialization complete
+    - "QUESTIONS_GENERATED": Initial questions created
+    - "CHOICES_GENERATED": Answer choices generated
+    - "SUCCESS": Survey generation complete
+    - "ERROR": Error occurred during generation
+    
+    Args:
+        request_id: Unique request identifier
+        data: Dictionary containing company_name, business_overview, research_objectives, project_name
+        llm_model: LLM model to use ("gpt" or "gemini")
+    """
+    logger.info("survey_generation_started", request_id=request_id, llm_model=llm_model)
     start_time = time.time()
-    update_survey_status(request_id, "RUNNING")
     
     ai_service = AIService(llm_model=llm_model)
     try:
         await ai_service.initialize()
         elapse = time.time() - start_time
-        logger.info(f"[{request_id}] AIService initialized ({elapse:.2f}s)")
+        logger.info("aiservice_initialized", request_id=request_id, elapsed_seconds=elapse)
+        
+        # Publish STARTED message
+        await publish_progress(request_id, "STARTED")
         
         company_name = data["company_name"]
         business_overview = data["business_overview"]
@@ -67,7 +109,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
             company_name, business_overview, research_objectives
         )
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 1 - Questionnaire generated ({step_time:.2f}s) - {len(questions)} questions")
+        logger.info("questionnaire_generated", request_id=request_id, question_count=len(questions), elapsed_seconds=step_time)
         
         questionnaire_str = "\n".join(questions)
         
@@ -81,18 +123,21 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                     "question": question_part,
                     "choices": []
                 })
+        
+        # Publish QUESTIONS_GENERATED message
+        await publish_progress(request_id, f"QUESTIONS_GENERATED: {len(parsed_questions)} questions")
 
         # STEP 2: Extra Questions
         step_start = time.time()
         await publish_progress(request_id, "Adding Matrix and Open-ended questions if necessary...")
         matrix_count = sum(1 for q in parsed_questions if q["type"] == "Matrix")
         oe_count = sum(1 for q in parsed_questions if q["type"] == "Open-ended")
-        logger.info(f"[{request_id}] Initial counts - Matrix: {matrix_count}, OE: {oe_count}")
+        logger.info("extra_questions_step_started", request_id=request_id, matrix_count=matrix_count, oe_count=oe_count)
         
         idx = len(parsed_questions)
         while matrix_count < settings.MinMatrixQuestions:
             idx += 1
-            logger.info(f"[{request_id}] Adding Matrix question {matrix_count + 1}/{settings.MinMatrixQuestions}")
+            logger.info("adding_matrix_question", request_id=request_id, current=matrix_count + 1, target=settings.MinMatrixQuestions)
             new_q = await ai_service.generate_extra_question(company_name, business_overview, research_objectives, questionnaire_str, idx, "Matrix")
             questionnaire_str += f"\n{new_q}"
             parsed_questions.append({"type": "Matrix", "question": new_q.split("]", 1)[1].strip(), "choices": []})
@@ -100,24 +145,27 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
             
         while oe_count < settings.MinMatrixOEQuestions:
             idx += 1
-            logger.info(f"[{request_id}] Adding Open-ended question {oe_count + 1}/{settings.MinMatrixOEQuestions}")
+            logger.info("adding_oe_question", request_id=request_id, current=oe_count + 1, target=settings.MinMatrixOEQuestions)
             new_q = await ai_service.generate_extra_question(company_name, business_overview, research_objectives, questionnaire_str, idx, "Open-ended")
             questionnaire_str += f"\n{new_q}"
             parsed_questions.append({"type": "Open-ended", "question": new_q.split("]", 1)[1].strip(), "choices": []})
             oe_count += 1
         
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 2 - Extra questions added ({step_time:.2f}s) - Total questions: {len(parsed_questions)}")
+        logger.info("extra_questions_completed", request_id=request_id, total_questions=len(parsed_questions), elapsed_seconds=step_time)
             
         # STEP 3: Batch Choices (Optimized)
         step_start = time.time()
-        await publish_progress(request_id, "Fleshing out choices using optimized batch generation...")
-        logger.info(f"[{request_id}] Starting optimized batch choice generation for {len(parsed_questions)} questions...")
+        await publish_progress(request_id, "Generating answer choices...")
+        logger.info("batch_choices_generation_started", request_id=request_id, question_count=len(parsed_questions))
         questions_with_choices = await ai_service.generate_batch_choices_optimized(
             parsed_questions, company_name, business_overview, research_objectives
         )
         step_time = time.time() - step_start
-        logger.info(f"[{request_id}] STEP 3 - Batch choices generated ({step_time:.2f}s)")
+        logger.info("batch_choices_generated", request_id=request_id, elapsed_seconds=step_time)
+        
+        # Publish CHOICES_GENERATED message
+        await publish_progress(request_id, f"CHOICES_GENERATED: {len(questions_with_choices)} questions with choices")
         
         # STEP 4: Video Questions (Optional)
         if settings.INCLUDE_VIDEO_QUESTIONS:
@@ -239,30 +287,36 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         
         if r2_url:
             doc_link = r2_url
-            await publish_progress(request_id, "SUCCESS")
             logger.info(f"[{request_id}] File uploaded to R2: {r2_url}")
         else:
             logger.warning(f"[{request_id}] R2 upload failed, falling back to local doc_link")
             doc_link = f"/api/v1/files/download/{filename}"
-            await publish_progress(request_id, "SUCCESS (Local File Fallback)")
         
         step_time = time.time() - step_start
         logger.info(f"[{request_id}] STEP 8 - File uploaded ({step_time:.2f}s)")
             
+        # Update status to COMPLETED
         update_survey_status(request_id, "COMPLETED", pages=pages, questionnaire_data=final_questions, doc_link=doc_link)
         
         total_time = time.time() - start_time
-        logger.info(f"[{request_id}] ✓ SURVEY GENERATION COMPLETE ({total_time:.2f}s total) - Generated {len(final_questions)} questions. Doc: {doc_link}")
+        logger.info("survey_generation_completed", request_id=request_id, question_count=len(final_questions), total_seconds=total_time, doc_link=doc_link)
+        
+        # Publish SUCCESS message
+        await publish_progress(request_id, "SUCCESS")
         
     except Exception as e:
         total_time = time.time() - start_time
-        logger.error(f"[{request_id}] ✗ SURVEY GENERATION FAILED after {total_time:.2f}s: {str(e)}", exc_info=True)
-        await publish_progress(request_id, f"ERROR: {str(e)}")
-        update_survey_status(request_id, "FAILED")
-        raise e
+        logger.error("survey_generation_failed", request_id=request_id, error=str(e), elapsed_seconds=total_time)
+        
+        # Publish ERROR message with details
+        error_msg = f"ERROR: {str(e)}"
+        await publish_progress(request_id, error_msg)
+        
+        # Status will be updated to FAILED by the Celery task wrapper
+        raise
     finally:
         await ai_service.close()
-        logger.info(f"[{request_id}] AIService closed")
+        logger.info("aiservice_closed", request_id=request_id)
 
 class AsyncTask(Task):
     """Base task class that supports async functions"""
@@ -278,17 +332,76 @@ class AsyncTask(Task):
     bind=True,
     base=AsyncTask,
     name="tasks.generate_survey",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
     max_retries=3,
     default_retry_delay=60
 )
 async def generate_survey_task(self, request_id: str, data: Dict[str, Any], llm_model: str = "gpt"):
-    logger.info(f"[{request_id}] Celery task started for survey generation with model: {llm_model}")
+    """
+    Celery task for asynchronous survey generation.
+    
+    Responsibilities:
+    - Load request data from DB
+    - Initialize AIService
+    - Generate questions and choices
+    - Save results to DB
+    - Update status: STARTING → RUNNING → COMPLETED
+    
+    Retry Strategy:
+    - Automatically retries on any Exception
+    - Exponential backoff with jitter
+    - Max 3 retries with up to 10 minutes between attempts
+    - Transient failures (AI/API issues) are handled gracefully
+    
+    Args:
+        request_id: Unique request identifier
+        data: Dictionary containing company_name, business_overview, research_objectives, project_name
+        llm_model: LLM model to use ("gpt" or "gemini")
+    """
+    logger.info("celery_task_started", request_id=request_id, attempt=self.request.retries + 1, max_retries=self.max_retries + 1, llm_model=llm_model)
+    
     try:
+        # Load request data from DB
+        db = SessionLocal()
+        try:
+            record = db.query(SurveyRequestRecord).filter(
+                SurveyRequestRecord.request_id == request_id
+            ).first()
+            
+            if not record:
+                logger.error("survey_record_not_found", request_id=request_id)
+                raise ValueError(f"Survey request '{request_id}' not found in database")
+            
+            # Update status to RUNNING
+            record.status = "RUNNING"
+            db.commit()
+            logger.info("survey_status_updated_to_running", request_id=request_id)
+            
+        finally:
+            db.close()
+        
+        # Execute async survey generation
         await async_generate_survey(request_id, data, llm_model)
-        logger.info(f"[{request_id}] Celery task completed successfully")
+        logger.info("celery_task_completed_successfully", request_id=request_id)
+        
     except Exception as e:
-        logger.error(f"[{request_id}] Celery task failed: {str(e)}", exc_info=True)
+        logger.error("celery_task_failed", request_id=request_id, error=str(e), attempt=self.request.retries + 1)
+        
+        # Update status to FAILED
+        try:
+            update_survey_status(request_id, "FAILED")
+            logger.info("survey_status_updated_to_failed", request_id=request_id)
+        except Exception as update_error:
+            logger.error("failed_to_update_status_to_failed", request_id=request_id, error=str(update_error))
+        
+        # Retry logic: autoretry_for handles automatic retries
         if self.request.retries < self.max_retries:
-            logger.info(f"[{request_id}] Retrying task (attempt {self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(exc=e, countdown=60)
-        raise
+            countdown = 60 * (2 ** self.request.retries)
+            logger.info("scheduling_retry", request_id=request_id, attempt=self.request.retries + 1, countdown_seconds=countdown)
+            raise self.retry(exc=e, countdown=countdown)
+        else:
+            logger.error("max_retries_exceeded", request_id=request_id, max_retries=self.max_retries)
+            raise
