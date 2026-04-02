@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import secrets
@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.auth import verify_token
 from app.core.logging import get_logger
 from app.core.metrics import get_metrics_collector
+from app.core.rate_limit import limiter
 
 logger = get_logger(__name__)
 metrics = get_metrics_collector()
@@ -25,96 +26,200 @@ metrics = get_metrics_collector()
 router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"], dependencies=[Depends(verify_token)])
 
 @router.post("/business-overview", response_model=BusinessOverviewResponse)
-async def get_business_overview(request: BusinessOverviewRequest):
-    logger.info(f"[{request.request_id}] POST /business-overview - Company: {request.company_name}, LLM: {request.llm_model}")
-    service = AIService(llm_model=request.llm_model)
+@limiter.limit("20/minute")
+async def get_business_overview(request: Request, req: BusinessOverviewRequest):
+    logger.info("business_overview_requested", request_id=req.request_id, company_name=req.company_name, llm_model=req.llm_model)
+    service = AIService(llm_model=req.llm_model)
     try:
         await service.initialize()
-        logger.debug(f"[{request.request_id}] AIService initialized with model: {request.llm_model}")
-        overview = await service.generate_business_overview(request.company_name)
-        logger.info(f"[{request.request_id}] Business overview generated successfully")
+        logger.info("aiservice_initialized", request_id=req.request_id)
+        overview = await service.generate_business_overview(req.company_name)
+        logger.info("business_overview_generated", request_id=req.request_id, company_name=req.company_name)
         return BusinessOverviewResponse(
             success=1,
-            request_id=request.request_id,
-            project_name=request.project_name,
-            company_name=request.company_name,
+            request_id=req.request_id,
+            project_name=req.project_name,
+            company_name=req.company_name,
             business_overview=overview,
-            industry=request.industry,
-            use_case=request.use_case
+            industry=req.industry,
+            use_case=req.use_case
         )
     except Exception as e:
-        logger.error(f"[{request.request_id}] Error generating business overview: {str(e)}", exc_info=True)
+        logger.error("business_overview_error", request_id=req.request_id, error=str(e))
+        metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         await service.close()
 
 @router.post("/research-objectives")
-async def get_research_objectives(request: ResearchObjectiveRequest):
-    logger.info(f"[{request.request_id}] POST /research-objectives - Company: {request.company_name}, LLM: {request.llm_model}")
-    service = AIService(llm_model=request.llm_model)
+@limiter.limit("20/minute")
+async def get_research_objectives(request: Request, req: ResearchObjectiveRequest):
+    logger.info("research_objectives_requested", request_id=req.request_id, company_name=req.company_name, llm_model=req.llm_model)
+    service = AIService(llm_model=req.llm_model)
     try:
         await service.initialize()
-        logger.debug(f"[{request.request_id}] Generating research objectives...")
+        logger.info("aiservice_initialized", request_id=req.request_id)
         objectives = await service.generate_research_objectives(
-            company_name=request.company_name,
-            business_overview=request.business_overview,
-            industry=request.industry,
-            use_case=request.use_case
+            company_name=req.company_name,
+            business_overview=req.business_overview,
+            industry=req.industry,
+            use_case=req.use_case
         )
-        logger.info(f"[{request.request_id}] Research objectives generated successfully")
+        logger.info("research_objectives_generated", request_id=req.request_id, company_name=req.company_name)
         return {
             "success": 1,
-            "request_id": request.request_id,
-            "project_name": request.project_name,
-            "company_name": request.company_name,
-            "business_overview": request.business_overview,
+            "request_id": req.request_id,
+            "project_name": req.project_name,
+            "company_name": req.company_name,
+            "business_overview": req.business_overview,
             "research_objectives": objectives,
-            "industry": request.industry,
-            "use_case": request.use_case
+            "industry": req.industry,
+            "use_case": req.use_case
         }
     except Exception as e:
-        logger.error(f"[{request.request_id}] Error generating research objectives: {str(e)}", exc_info=True)
+        logger.error("research_objectives_error", request_id=req.request_id, error=str(e))
+        metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         await service.close()
 
 @router.post("/business-research")
-async def get_business_research(request: BusinessOverviewRequest):
-    logger.info(f"[{request.request_id}] POST /business-research - Company: {request.company_name}, LLM: {request.llm_model}")
-    service = AIService(llm_model=request.llm_model)
+@limiter.limit("20/minute")
+async def get_business_research(request: Request, req: BusinessOverviewRequest):
+    logger.info("business_research_requested", request_id=req.request_id, company_name=req.company_name, llm_model=req.llm_model)
+    service = AIService(llm_model=req.llm_model)
     try:
         await service.initialize()
-        logger.debug(f"[{request.request_id}] Generating business overview and research objectives...")
-        overview = await service.generate_business_overview(request.company_name)
+        logger.info("aiservice_initialized", request_id=req.request_id)
+        overview = await service.generate_business_overview(req.company_name)
         objectives = await service.generate_research_objectives(
-            company_name=request.company_name,
+            company_name=req.company_name,
             business_overview=overview,
-            industry=request.industry,
-            use_case=request.use_case
+            industry=req.industry,
+            use_case=req.use_case
         )
-        logger.info(f"[{request.request_id}] Business research completed successfully")
+        logger.info("business_research_completed", request_id=req.request_id, company_name=req.company_name)
         return {
             "success": 1,
-            "request_id": request.request_id,
-            "project_name": request.project_name,
-            "company_name": request.company_name,
+            "request_id": req.request_id,
+            "project_name": req.project_name,
+            "company_name": req.company_name,
             "business_overview": overview,
             "research_obj": objectives,
-            "industry": request.industry,
-            "use_case": request.use_case
+            "industry": req.industry,
+            "use_case": req.use_case
         }
     except Exception as e:
-        logger.error(f"[{request.request_id}] Error in business research: {str(e)}", exc_info=True)
+        logger.error("business_research_error", request_id=req.request_id, error=str(e))
+        metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         await service.close()
 
 @router.post("/generate", response_model=SurveyStatusResponse)
-def generate_questionnaire(request: SurveyGenerationRequest, db: Session = Depends(get_db)):
-    logger.info(f"[{request.request_id}] POST /generate - Starting survey generation with LLM: {request.llm_model}")
+@limiter.limit("10/minute")
+def generate_questionnaire(request: Request, req: SurveyGenerationRequest, db: Session = Depends(get_db)):
+    logger.info("survey_generation_requested", request_id=req.request_id, company_name=req.company_name, llm_model=req.llm_model)
+    metrics.record_survey_started()
+    
     try:
         # Check if request exists
-        record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request.request_id).first()
+        record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
+        
+        if not record:
+            # Try to create new record with IntegrityError handling
+            try:
+                record = SurveyRequestRecord(
+                    request_id=req.request_id,
+                    project_name=req.project_name,
+                    company_name=req.company_name,
+                    industry=req.industry,
+                    use_case=req.use_case,
+                    business_overview=req.business_overview,
+                    research_objectives=req.research_objectives,
+                    status="STARTING"
+                )
+                db.add(record)
+                db.commit()
+                logger.info("survey_record_created", request_id=req.request_id, company_name=req.company_name)
+            except IntegrityError:
+                # Record was created by another request, fetch it
+                db.rollback()
+                record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
+                if not record:
+                    logger.error("survey_record_creation_failed", request_id=req.request_id)
+                    raise HTTPException(status_code=500, detail="Failed to retrieve survey request record")
+        
+        # If already completed, return cached result
+        if record.status == "COMPLETED":
+            logger.info("survey_cached_result_returned", request_id=req.request_id, company_name=req.company_name, status="COMPLETED")
+            metrics.record_survey_completed()
+            return SurveyStatusResponse(
+                success=1,
+                status=record.status,
+                request_id=req.request_id,
+                project_name=req.project_name,
+                company_name=req.company_name,
+                research_objectives=req.research_objectives,
+                business_overview=req.business_overview,
+                industry=req.industry,
+                use_case=req.use_case,
+                pages=record.pages,
+                doc_link=record.doc_link
+            )
+        
+        # If already running, just return status
+        if record.status == "RUNNING":
+            logger.info("survey_already_running", request_id=req.request_id, company_name=req.company_name)
+            return SurveyStatusResponse(
+                success=2,
+                status="RUNNING",
+                request_id=req.request_id,
+                project_name=req.project_name,
+                company_name=req.company_name,
+                research_objectives=req.research_objectives,
+                business_overview=req.business_overview,
+                industry=req.industry,
+                use_case=req.use_case,
+                pages="",
+                doc_link=""
+            )
+        
+        # Delegate to Celery task (non-blocking)
+        logger.info("delegating_to_celery", request_id=req.request_id, company_name=req.company_name)
+        from app.tasks.survey_tasks import generate_survey_task
+        
+        task = generate_survey_task.delay(
+            request_id=req.request_id,
+            data={
+                "company_name": req.company_name,
+                "business_overview": req.business_overview,
+                "research_objectives": req.research_objectives,
+                "project_name": req.project_name
+            },
+            llm_model=req.llm_model
+        )
+        
+        logger.info("celery_task_queued", request_id=req.request_id, company_name=req.company_name, task_id=task.id)
+        
+        return SurveyStatusResponse(
+            success=2,
+            status="RUNNING",
+            request_id=req.request_id,
+            project_name=req.project_name,
+            company_name=req.company_name,
+            research_objectives=req.research_objectives,
+            business_overview=req.business_overview,
+            industry=req.industry,
+            use_case=req.use_case,
+            pages="",
+            doc_link=""
+        )
+    except Exception as e:
+        logger.error("survey_generation_error", request_id=req.request_id, company_name=req.company_name, error=str(e))
+        metrics.record_survey_failed()
+        metrics.record_error(type(e).__name__)
+        raise HTTPException(status_code=500, detail=str(e))
         
         if not record:
             # Try to create new record with IntegrityError handling

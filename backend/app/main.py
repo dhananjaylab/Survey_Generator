@@ -6,6 +6,8 @@ from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.metrics import get_metrics_collector
+from app.core.rate_limit import limiter, rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from app.api.v1 import router, files, websockets, auth
 from app.models.database import engine, Base
 import redis.asyncio as aioredis
@@ -124,6 +126,10 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
+
+# Add rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Add request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
