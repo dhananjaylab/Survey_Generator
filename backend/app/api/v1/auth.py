@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 class RegisterRequest(BaseModel):
     """User registration request."""
     username: str = Field(..., min_length=3, max_length=255, description="Username (3-255 characters)")
-    password: str = Field(..., min_length=8, max_length=255, description="Password (minimum 8 characters)")
+    password: str = Field(..., min_length=8, description="Password (minimum 8 characters)")
 
 
 class LoginRequest(BaseModel):

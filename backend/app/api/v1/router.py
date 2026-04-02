@@ -222,8 +222,8 @@ def generate_questionnaire(request: Request, req: SurveyGenerationRequest, db: S
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status/{request_id}")
-@limiter.limit("30/minute")
-def get_survey_status(request_id: str, db: Session = Depends(get_db)):
+@limiter.limit("120/minute")
+def get_survey_status(request: Request, request_id: str, db: Session = Depends(get_db)):
     """
     Poll the status of a survey generation task.
     

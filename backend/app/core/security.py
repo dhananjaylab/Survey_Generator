@@ -2,7 +2,7 @@
 Security utilities for password hashing and JWT token management.
 """
 
-from passlib.context import CryptContext
+import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
@@ -11,8 +11,34 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def _truncate_password(password: str) -> bytes:
+    """
+    Truncate password to 72 bytes (bcrypt's hard limit) and return as bytes.
+    
+    Handles UTF-8 multi-byte characters properly by finding a valid
+    UTF-8 boundary within the 72-byte limit.
+    
+    Args:
+        password: Plain text password
+        
+    Returns:
+        Truncated password as bytes (≤72 bytes)
+    """
+    password_bytes = password.encode('utf-8')
+    
+    if len(password_bytes) <= 72:
+        return password_bytes
+    
+    # Truncate to 72 bytes, handling UTF-8 boundaries
+    for length in range(72, max(0, 72 - 4), -1):  # UTF-8 chars are max 4 bytes
+        try:
+            password_bytes[:length].decode('utf-8')
+            return password_bytes[:length]
+        except UnicodeDecodeError:
+            continue
+    
+    # Fallback: use first 72 bytes
+    return password_bytes[:72]
 
 # JWT configuration
 ALGORITHM = "HS256"
@@ -23,18 +49,28 @@ def hash_password(password: str) -> str:
     """
     Hash a plain text password using bcrypt.
     
+    Bcrypt has a hard limit of 72 bytes. This function truncates passwords
+    to 72 bytes (UTF-8 encoded) before hashing to prevent bcrypt errors
+    while maintaining backward compatibility for passwords ≤72 bytes.
+    
     Args:
         password: Plain text password to hash
         
     Returns:
         Hashed password string
     """
-    return pwd_context.hash(password)
+    password_bytes = _truncate_password(password)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     """
     Verify a plain text password against a bcrypt hash.
+    
+    Applies the same 72-byte truncation as hash_password() to ensure
+    consistency between registration and login flows.
     
     Args:
         password: Plain text password to verify
@@ -43,7 +79,9 @@ def verify_password(password: str, password_hash: str) -> bool:
     Returns:
         True if password matches hash, False otherwise
     """
-    return pwd_context.verify(password, password_hash)
+    password_bytes = _truncate_password(password)
+    hash_bytes = password_hash.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hash_bytes)
 
 
 def create_access_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:

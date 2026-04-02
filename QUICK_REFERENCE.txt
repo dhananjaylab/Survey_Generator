@@ -1,0 +1,149 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  SURVEY GENERATOR - QUICK REFERENCE                        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌─ PREREQUISITES ──────────────────────────────────────────────────────────┐
+│ ✓ Python 3.9+        → python --version                                 │
+│ ✓ Node.js 18+        → node --version                                   │
+│ ✓ Redis running      → redis-cli ping (should return PONG)              │
+│ ✓ API Keys           → Add to backend/.env                              │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ QUICK START ────────────────────────────────────────────────────────────┐
+│                                                                           │
+│ macOS/Linux:                                                             │
+│   chmod +x quick-start.sh                                               │
+│   ./quick-start.sh                                                       │
+│                                                                           │
+│ Windows:                                                                 │
+│   quick-start.bat                                                        │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ MANUAL STARTUP (3 TERMINALS) ───────────────────────────────────────────┐
+│                                                                           │
+│ TERMINAL 1 - BACKEND:                                                    │
+│   cd backend                                                             │
+│   source venv/bin/activate  (macOS/Linux)                               │
+│   venv\Scripts\activate.bat (Windows)                                   │
+│   uvicorn app.main:app --reload                                         │
+│                                                                           │
+│ TERMINAL 2 - CELERY WORKER:                                              │
+│   cd backend                                                             │
+│   source venv/bin/activate  (macOS/Linux)                               │
+│   venv\Scripts\activate.bat (Windows)                                   │
+│   celery -A app.core.celery worker --loglevel=info                      │
+│                                                                           │
+│ TERMINAL 3 - FRONTEND:                                                   │
+│   cd frontend                                                            │
+│   npm run dev                                                            │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ VERIFICATION ───────────────────────────────────────────────────────────┐
+│                                                                           │
+│ Backend:   curl http://localhost:8000/health                            │
+│ Redis:     redis-cli ping                                               │
+│ Celery:    celery -A app.core.celery inspect active                     │
+│ Frontend:  curl http://localhost:3000                                   │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ ACCESS POINTS ──────────────────────────────────────────────────────────┐
+│                                                                           │
+│ Frontend:        http://localhost:3000                                   │
+│ Login:           http://localhost:3000/login                             │
+│ Backend API:     http://localhost:8000                                   │
+│ Swagger UI:      http://localhost:8000/docs                              │
+│ Health Check:    http://localhost:8000/health                            │
+│ Metrics:         http://localhost:8000/metrics                           │
+│ Flower (opt):    http://localhost:5555                                   │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ CONFIGURATION ──────────────────────────────────────────────────────────┐
+│                                                                           │
+│ Backend (.env):                                                          │
+│   DATABASE_URL=sqlite:///./survey_generator.db                          │
+│   REDIS_URL=redis://localhost:6379/0                                    │
+│   OPENAI_API_KEY=your_key_here                                          │
+│   GOOGLE_API_KEY=your_key_here                                          │
+│   SECRET_KEY=your-secret-key                                            │
+│                                                                           │
+│ Frontend (.env.local):                                                   │
+│   NEXT_PUBLIC_API_URL=http://localhost:8000                             │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ TROUBLESHOOTING ────────────────────────────────────────────────────────┐
+│                                                                           │
+│ Redis not running:                                                       │
+│   macOS:   brew services start redis                                    │
+│   Linux:   sudo systemctl start redis-server                            │
+│   Docker:  docker run -d -p 6379:6379 redis:latest                     │
+│                                                                           │
+│ Port already in use:                                                     │
+│   Backend:  uvicorn app.main:app --port 8001                            │
+│   Frontend: npm run dev -- -p 3001                                      │
+│                                                                           │
+│ Module not found:                                                        │
+│   pip install -r requirements.txt                                       │
+│                                                                           │
+│ API connection failed:                                                   │
+│   1. Check backend is running: http://localhost:8000/health             │
+│   2. Check NEXT_PUBLIC_API_URL in frontend/.env.local                   │
+│   3. Clear browser cache and localStorage                               │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ SERVICE PORTS ──────────────────────────────────────────────────────────┐
+│                                                                           │
+│ Backend:    8000                                                         │
+│ Frontend:   3000                                                         │
+│ Redis:      6379                                                         │
+│ Flower:     5555 (optional)                                              │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ FIRST TIME USAGE ───────────────────────────────────────────────────────┐
+│                                                                           │
+│ 1. Open http://localhost:3000/login                                      │
+│ 2. Click "Create Account"                                                │
+│ 3. Enter username (3+ chars) and password (8+ chars)                     │
+│ 4. Click "Create Account"                                                │
+│ 5. Fill in project details                                               │
+│ 6. Select AI model                                                       │
+│ 7. Click "Next: Research Objectives"                                     │
+│ 8. Review and edit content                                               │
+│ 9. Click "Generate Survey"                                               │
+│ 10. Watch real-time progress                                             │
+│ 11. Edit and export your survey                                          │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ DOCUMENTATION ──────────────────────────────────────────────────────────┐
+│                                                                           │
+│ START_HERE.md         - Quick start guide                                │
+│ RUN_SERVICES.md       - Detailed service management                      │
+│ SETUP_GUIDE.md        - Complete setup and troubleshooting               │
+│ SERVICES_SUMMARY.md   - Services overview                                │
+│ backend/README.md     - Backend documentation                            │
+│ frontend/README.md    - Frontend documentation                           │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─ OPTIONAL: CELERY MONITORING ────────────────────────────────────────────┐
+│                                                                           │
+│ Terminal 4 - Flower (Task Monitoring):                                   │
+│   cd backend                                                             │
+│   source venv/bin/activate  (macOS/Linux)                               │
+│   venv\Scripts\activate.bat (Windows)                                   │
+│   celery -A app.core.celery flower --port=5555                          │
+│                                                                           │
+│ Access at: http://localhost:5555                                         │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    🚀 READY TO START CREATING SURVEYS! 🚀                 ║
+╚════════════════════════════════════════════════════════════════════════════╝

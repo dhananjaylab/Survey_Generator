@@ -22,4 +22,8 @@ pydantic-settings
 structlog>=24.1.0
 python-json-logger>=2.0.7
 slowapi>=0.1.9
-passlib[bcrypt]>=1.7.4
+passlib>=1.7.4
+bcrypt>=4.0.0,<5.0.0
+# Gevent is required for Windows production Celery workers
+# Provides async pool support on Windows where prefork is not available
+gevent>=23.0.0
