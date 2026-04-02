@@ -3,8 +3,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Survey Generator API"
-    OPENAI_API_KEY: str
-    DATABASE_URL: str
+    SECRET_KEY: str = "your-secret-key-change-in-production"  # Change in production!
+    BASIC_AUTH_USERNAME: str = "admin"
+    BASIC_AUTH_PASSWORD: str = "surveygen2024"
+    OPENAI_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""
+    DATABASE_URL: str = "sqlite+aiosqlite:///./survey_generator.db"
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # R2 Storage Config
@@ -17,6 +21,7 @@ class Settings(BaseSettings):
     # Models config
     GPT3_MODEL: str = "gpt-4o-mini"
     CHATGPT_MODEL: str = "gpt-4o-mini"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     
     # Optional parameters based on config.ini defaults
     BusinessOverviewMaxToken: int = 200
@@ -29,8 +34,10 @@ class Settings(BaseSettings):
     ChoicesMatrixMaxToken: int = 100
     ChoicesMCQMaxToken: int = 200
     
+    
     MinMatrixQuestions: int = 1
     MinMatrixOEQuestions: int = 1
+    INCLUDE_VIDEO_QUESTIONS: bool = False  # Set to True to include video questions
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
 

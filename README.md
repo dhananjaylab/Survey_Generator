@@ -44,3 +44,32 @@ AI Survey Generator is a powerful tool that automates the creation of survey que
 *   **💯 Easy to Use:** User-friendly web interface and straightforward API access for all users.
 
 ---
+
+## 🪟 Windows Users
+
+If you're running this application on Windows, Celery requires special configuration. See [WINDOWS_CELERY_SETUP.md](WINDOWS_CELERY_SETUP.md) for detailed setup instructions, including:
+- Why Windows needs different pool configuration
+- Development setup with solo pool
+- Production setup with gevent pool
+- Troubleshooting common Windows Celery issues
+
+**Quick start for Windows:**
+```bash
+# Development (automatic solo pool)
+celery -A app.core.celery worker --loglevel=info
+
+# Production (automatic gevent pool)
+set CELERY_ENV=production
+celery -A app.core.celery worker --loglevel=info
+```
+
+---
+
+## 🐧 Linux/Mac Users
+
+Celery continues to use the prefork pool automatically on Linux and Mac systems:
+```bash
+celery -A app.core.celery worker --loglevel=info
+```
+
+No special configuration needed.

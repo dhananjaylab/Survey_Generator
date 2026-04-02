@@ -7,6 +7,7 @@ class BusinessOverviewRequest(BaseModel):
     company_name: str
     industry: str
     use_case: str
+    llm_model: str = "gpt"
 
 class BusinessOverviewResponse(BaseModel):
     success: int = 1
@@ -24,6 +25,7 @@ class ResearchObjectiveRequest(BaseModel):
     business_overview: str
     industry: str
     use_case: str
+    llm_model: str = "gpt"
     
 class SurveyGenerationRequest(BaseModel):
     request_id: str
@@ -33,6 +35,7 @@ class SurveyGenerationRequest(BaseModel):
     research_objectives: str
     industry: str
     use_case: str
+    llm_model: str = "gpt"
 
 class SurveyStatusResponse(BaseModel):
     success: int

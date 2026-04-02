@@ -1,0 +1,26 @@
+import type { Metadata } from 'next'
+import './globals.css'
+import ClientLayout from '@/components/ClientLayout'
+
+export const metadata: Metadata = {
+  title: 'Knit AI Survey Generator',
+  description: 'Create bespoke, AI-powered survey designs in minutes with drag-and-drop editing.',
+  keywords: ['survey generator', 'AI survey', 'questionnaire builder', 'SurveyJS'],
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+      </head>
+      <body className="antialiased">
+        {/* Floating background orbs */}
+        <div className="floating-orb" style={{ width: 600, height: 600, top: '-10%', left: '-5%', background: '#6366f1' }} />
+        <div className="floating-orb" style={{ width: 500, height: 500, bottom: '-10%', right: '-5%', background: '#8b5cf6', animationDelay: '-7s' }} />
+        <div className="floating-orb" style={{ width: 300, height: 300, top: '40%', right: '20%', background: '#38bdf8', animationDelay: '-13s' }} />
+        <ClientLayout>{children}</ClientLayout>
+      </body>
+    </html>
+  )
+}
