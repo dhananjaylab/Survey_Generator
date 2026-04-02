@@ -20,6 +20,14 @@ interface WizardStore extends WizardData {
   reset: () => void
 }
 
+// Authentication store
+interface AuthState {
+  isAuthenticated: boolean
+  username: string | null
+  setAuthenticated: (isAuth: boolean, username?: string) => void
+  logout: () => void
+}
+
 const initialState: WizardData = {
   requestId: '',
   projectName: '',
@@ -45,6 +53,25 @@ export const useWizardStore = create<WizardStore>()(
       name: 'survey-wizard-state',
       storage: createJSONStorage(() => {
         if (typeof window !== 'undefined') return sessionStorage
+        return { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+      }),
+    }
+  )
+)
+
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      isAuthenticated: false,
+      username: null,
+      setAuthenticated: (isAuth, username) => 
+        set({ isAuthenticated: isAuth, username: username || null }),
+      logout: () => set({ isAuthenticated: false, username: null }),
+    }),
+    {
+      name: 'survey-auth-state',
+      storage: createJSONStorage(() => {
+        if (typeof window !== 'undefined') return localStorage
         return { getItem: () => null, setItem: () => {}, removeItem: () => {} }
       }),
     }

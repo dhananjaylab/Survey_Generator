@@ -85,7 +85,16 @@ export default function ProjectDetailsStep() {
 
       router.push('/research')
     } catch (err: any) {
-      setError(err.message || 'Failed to generate business overview')
+      console.error('API Error:', err)
+      
+      // Handle specific error types
+      if (err.message.includes('Authentication')) {
+        setError('Please log in to continue')
+      } else if (err.message.includes('Too many requests')) {
+        setError('Too many requests. Please try again later.')
+      } else {
+        setError(err.message || 'Failed to generate business overview')
+      }
     } finally {
       setLoading(false)
     }

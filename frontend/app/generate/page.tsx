@@ -103,57 +103,39 @@ export default function GenerateSurveyStep() {
     setProgress((prev) => [...prev, `${new Date().toLocaleTimeString()}: ${message}`])
   }
 
-  const startPolling = () => {
-    let pollAttempts = 0
-    const MAX_ATTEMPTS = 300 // 10 minutes at 2 second intervals
-    
-    const pollInterval = setInterval(async () => {
-      pollAttempts++
+  const startPolling = async () => {
+    try {
+      addProgress('🔄 Starting status polling with retry logic...')
       
-      // Safety timeout after 10 minutes
-      if (pollAttempts > MAX_ATTEMPTS) {
-        clearInterval(pollInterval)
-        addProgress('⚠️ Timeout: Survey generation took too long (10+ minutes)')
-        setStatus('TIMEOUT')
-        return
+      const response = await api.pollSurveyStatus(wizardData.requestId)
+      
+      setStatus(response.status)
+      
+      if (response.pages && !wizardData.surveyPages.length) {
+        const pages = typeof response.pages === 'string' 
+          ? JSON.parse(response.pages)
+          : response.pages
+        setData({ surveyPages: Array.isArray(pages) ? pages : [pages] })
       }
       
-      try {
-        const response = await api.getSurveyStatus(wizardData.requestId)
-        setStatus(response.status)
-
-        if (response.pages && !wizardData.surveyPages.length) {
-          const pages = typeof response.pages === 'string' 
-            ? JSON.parse(response.pages)
-            : response.pages
-          setData({ surveyPages: Array.isArray(pages) ? pages : [pages] })
-        }
-        if (response.doc_link) {
-          setData({ docLink: response.doc_link })
-        }
-
-        if (response.status === 'COMPLETED') {
-          addProgress('✅ Survey generation completed successfully!')
-          setCurrentStep(4)
-          clearInterval(pollInterval)
-          setTimeout(() => router.push('/builder'), 2000)
-        }
-        
-        if (response.status === 'FAILED') {
-          addProgress('❌ Survey generation failed on backend')
-          clearInterval(pollInterval)
-        }
-      } catch (err: any) {
-        console.error(`Polling error (attempt ${pollAttempts}/${MAX_ATTEMPTS}):`, err)
-        addProgress(`⚠️ Polling error (attempt ${pollAttempts}): ${err?.message || 'Unknown error'}`)
-        
-        // Stop polling after too many errors
-        if (pollAttempts > 10) {
-          clearInterval(pollInterval)
-          addProgress('❌ Polling failed after 10 attempts. Please check backend logs.')
-        }
+      if (response.doc_link) {
+        setData({ docLink: response.doc_link })
       }
-    }, 2000)
+
+      if (response.status === 'COMPLETED') {
+        addProgress('✅ Survey generation completed successfully!')
+        setCurrentStep(4)
+        setTimeout(() => router.push('/builder'), 2000)
+      } else if (response.status === 'FAILED') {
+        addProgress('❌ Survey generation failed on backend')
+        setError('Survey generation failed. Please try again.')
+      }
+      
+    } catch (err: any) {
+      console.error('Polling failed:', err)
+      addProgress(`❌ Polling failed: ${err?.message || 'Unknown error'}`)
+      setError(err?.message || 'Failed to poll survey status')
+    }
   }
 
   const pollStatus = async () => {
