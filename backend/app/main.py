@@ -15,7 +15,7 @@ from app.models.database import engine, Base
 import redis.asyncio as aioredis
 
 # Configure structured logging
-configure_logging(log_level="INFO")
+configure_logging(log_level=settings.LOGGING_LEVEL)
 logger = get_logger(__name__)
 
 # Initialize metrics
