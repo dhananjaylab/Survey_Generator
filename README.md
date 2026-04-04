@@ -32,8 +32,8 @@ AI Survey Generator is a powerful tool that automates the creation of survey que
 **⚙️ Setup (Quick Setup):**
 
 1.  ⬇️ Install Python and required libraries (refer to the detailed documentation for comprehensive steps).
-2.  🔑 Configure your OpenAI API key within the `config.ini` file.
-3.  🚀 Run either `app.py` (for the web UI) or `flask_api.py` (for the REST API).
+2.  🔑 Configure your API keys and settings in the `backend/.env` file.
+3.  🚀 Run the FastAPI backend and Next.js frontend (refer to their respective directories for startup scripts).
 
 ---
 

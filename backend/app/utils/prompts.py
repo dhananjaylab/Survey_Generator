@@ -1,11 +1,10 @@
-import os
-import yaml
-from pathlib import Path
+from app.core.config import settings
 
 class PromptTemplates:
     def __init__(self):
         # Industry standard: resolver path relative to the current file
-        self.base_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "prompts_chatgpt"
+        backend_root = Path(__file__).resolve().parent.parent.parent
+        self.base_path = backend_root / settings.PROMPTS_BASE_PATH
         self._load_prompts()
         
     def _load_prompts(self):

@@ -21,19 +21,25 @@ export default function GenerateSurveyStep() {
   const setData = useWizardStore((state) => state.setData)
   const wizardData = useWizardStore()
 
+  const [initiated, setInitiated] = useState(false)
   const [status, setStatus] = useState('STARTING')
   const [progress, setProgress] = useState<string[]>([])
   const [error, setError] = useState('')
   const [currentStep, setCurrentStep] = useState(0)
-
+  
   useEffect(() => {
     if (!wizardData.requestId) {
       router.push('/')
       return
     }
 
+    // Only initiate once
+    if (initiated) return
+    setInitiated(true)
+
     const initiateGeneration = async () => {
       try {
+        addProgress('🚀 Initializing survey generation...')
         // Trigger survey generation
         const response = await api.generateSurvey({
           request_id: wizardData.requestId,
@@ -57,103 +63,138 @@ export default function GenerateSurveyStep() {
         // Connect to WebSocket for live progress
         connectWebSocket()
       } catch (err: any) {
+        console.error('Generation error:', err)
         setError(err.message || 'Failed to start survey generation')
+        // If we get a 429, we should still try to connect WS or poll if it's already running
+        if (err.message?.includes('429') || err.message?.includes('Too many requests')) {
+           addProgress('⚠️ Rate limit hit, but generation may be in progress. Connecting to stream...')
+           connectWebSocket()
+        }
       }
     }
 
     initiateGeneration()
-  }, [wizardData, router, setData])
+  }, [wizardData.requestId, initiated, router, setData])
 
   const connectWebSocket = () => {
+    // Prevent multiple connections
+    if (typeof window !== 'undefined' && (window as any)._currentWS) {
+       (window as any)._currentWS.close()
+    }
+
     const ws = createWebSocket(wizardData.requestId)
+    if (typeof window !== 'undefined') (window as any)._currentWS = ws
 
     ws.onopen = () => {
-      addProgress('Connected to generation stream')
+      addProgress('📡 Connected to live generation stream')
     }
 
     ws.onmessage = (event) => {
-      const message = event.data
-      addProgress(message)
+      try {
+        const data = JSON.parse(event.data)
+        const update = data.update || data.message || event.data
+        
+        if (typeof update === 'string') {
+          addProgress(update)
 
-      // Detect step progression
-      if (message.includes('drafting')) setCurrentStep(0)
-      if (message.includes('variant')) setCurrentStep(1)
-      if (message.includes('choice')) setCurrentStep(2)
-      if (message.includes('DOCX')) setCurrentStep(3)
-      if (message.includes('SUCCESS')) {
-        setStatus('COMPLETED')
-        // Poll final status
-        setTimeout(pollStatus, 1000)
+          // Detect step progression
+          if (update.includes('Drafting')) setCurrentStep(0)
+          if (update.includes('Adding')) setCurrentStep(1)
+          if (update.includes('choices')) setCurrentStep(2)
+          if (update.includes('DOCX')) setCurrentStep(3)
+          
+          if (update === 'SUCCESS' || data.completed) {
+            addProgress('✨ AI has finished crafting your survey!')
+            setStatus('COMPLETED')
+            setCurrentStep(4)
+            // Poll final status to get the data
+            setTimeout(pollStatus, 500)
+          }
+        }
+      } catch (e) {
+        // Fallback for non-json messages
+        addProgress(event.data)
+        if (event.data === 'SUCCESS') {
+           setStatus('COMPLETED')
+           setCurrentStep(4)
+           setTimeout(pollStatus, 500)
+        }
       }
     }
 
     ws.onerror = (error) => {
-      addProgress(`WebSocket error: ${error}`)
-      // Fallback to polling
+      console.warn('WebSocket error:', error)
+      addProgress('⚠️ Connection interrupted, switching to adaptive polling...')
       startPolling()
     }
 
-    ws.onclose = () => {
-      addProgress('Connection closed, switching to polling...')
-      startPolling()
+    ws.onclose = (event) => {
+      if (!event.wasClean) {
+        addProgress('🔌 Connection lost, retrying via polling...')
+        startPolling()
+      }
     }
   }
 
   const addProgress = (message: string) => {
-    setProgress((prev) => [...prev, `${new Date().toLocaleTimeString()}: ${message}`])
+    if (!message) return
+    setProgress((prev) => {
+      // Don't add duplicate messages
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1]
+        if (last.endsWith(message)) return prev
+      }
+      return [...prev, `${new Date().toLocaleTimeString()}: ${message}`]
+    })
   }
 
   const startPolling = async () => {
     try {
-      addProgress('🔄 Starting status polling with retry logic...')
-      
+      addProgress('🔄 Polling for updates...')
       const response = await api.pollSurveyStatus(wizardData.requestId)
       
       setStatus(response.status)
+      updateWizardData(response)
       
-      if (response.pages && !wizardData.surveyPages.length) {
-        const pages = typeof response.pages === 'string' 
-          ? JSON.parse(response.pages)
-          : response.pages
-        setData({ surveyPages: Array.isArray(pages) ? pages : [pages] })
-      }
-      
-      if (response.doc_link) {
-        setData({ docLink: response.doc_link })
-      }
-
       if (response.status === 'COMPLETED') {
-        addProgress('✅ Survey generation completed successfully!')
+        addProgress('✅ Survey generation completed!')
         setCurrentStep(4)
-        setTimeout(() => router.push('/builder'), 2000)
+        setTimeout(() => router.push('/builder'), 1500)
       } else if (response.status === 'FAILED') {
-        addProgress('❌ Survey generation failed on backend')
-        setError('Survey generation failed. Please try again.')
+        setError('Generation failed. Please try again or check logs.')
       }
-      
     } catch (err: any) {
       console.error('Polling failed:', err)
-      addProgress(`❌ Polling failed: ${err?.message || 'Unknown error'}`)
       setError(err?.message || 'Failed to poll survey status')
+    }
+  }
+
+  const updateWizardData = (response: any) => {
+    if (response.pages) {
+      const pages = typeof response.pages === 'string' 
+        ? JSON.parse(response.pages)
+        : response.pages
+      if (Array.isArray(pages) && pages.length > 0) {
+        setData({ surveyPages: pages })
+      }
+    }
+    if (response.doc_link) {
+      setData({ docLink: response.doc_link })
     }
   }
 
   const pollStatus = async () => {
     try {
       const response = await api.getSurveyStatus(wizardData.requestId)
-      if (response.pages) {
-        const pages = typeof response.pages === 'string' 
-          ? JSON.parse(response.pages)
-          : response.pages
-        setData({ surveyPages: Array.isArray(pages) ? pages : [pages] })
+      updateWizardData(response)
+      if (response.status === 'COMPLETED') {
+        setTimeout(() => router.push('/builder'), 1000)
+      } else {
+        // Not completed yet, try again
+        setTimeout(pollStatus, 2000)
       }
-      if (response.doc_link) {
-        setData({ docLink: response.doc_link })
-      }
-      setTimeout(() => router.push('/builder'), 1500)
     } catch (err: any) {
-      console.error('Failed to fetch final status:', err)
-      // Try again
+      console.error('Final status poll failed:', err)
       setTimeout(pollStatus, 2000)
     }
   }
