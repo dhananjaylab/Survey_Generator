@@ -1,6 +1,6 @@
 import os
 import logging
-from pydantic import field_validator, ValidationError
+from pydantic import field_validator, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -56,8 +56,21 @@ class Settings(BaseSettings):
     # Prompt config
     PROMPTS_BASE_PATH: str = "prompts/prompts_chatgpt"
     
+    @model_validator(mode='after')
+    def validate_secret_key(self):
+        """
+        Validate SECRET_KEY is not the default insecure value in production.
+        """
+        is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
+        if self.SECRET_KEY == "your-secret-key-change-in-production" and not is_development:
+            raise ValueError(
+                "SECURITY: Default SECRET_KEY used in non-development environment. "
+                "Set a secure SECRET_KEY in your .env file."
+            )
+        return self
+
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=os.path.join(os.path.dirname(__file__), "..", ".env"), 
         env_file_encoding='utf-8',
         case_sensitive=False,  # Allow mixed case env variables
         extra='ignore'

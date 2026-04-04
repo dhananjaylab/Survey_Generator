@@ -9,6 +9,7 @@ on Windows with the default prefork pool configuration.
 
 import platform
 import sys
+import os
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -84,7 +85,6 @@ class TestCeleryWindowsBugCondition:
     def test_windows_prefork_pool_initialization_fails(self):
         """
         Specific test case: Windows + prefork pool initialization MUST fail.
-        
         This test directly verifies the bug condition on Windows with prefork pool.
         Expected: PermissionError or similar billiard synchronization error.
         """
@@ -196,32 +196,35 @@ class TestCeleryWindowsBugCounterexamples:
     These counterexamples prove the bug condition is real and reproducible.
     """
 
-    def test_counterexample_windows_prefork_permission_error(self):
+    def test_fix_windows_prefork_no_permission_error(self):
         """
-        Counterexample 1: Celery worker initialization on Windows fails with PermissionError.
+        Verify Fix: Celery worker initialization on Windows no longer fails with PermissionError.
         
-        When attempting to initialize a Celery worker on Windows with the default
-        prefork pool configuration, the billiard pool synchronization layer fails
-        with PermissionError [WinError 5] "Access is denied".
+        Now that the code detects Windows and selects a compatible pool (solo or gevent),
+        attempting to initialize a worker on Windows should not cause the billiard 
+        synchronization error.
         
-        This counterexample demonstrates the bug exists on unfixed code.
+        This test demonstrates that the bug is fixed.
         """
-        # On Windows, attempting to use prefork pool fails
-        if platform.system() == 'Windows':
-            with pytest.raises(PermissionError, match=r"WinError 5"):
-                # Simulate what happens when celery -A app.core.celery worker is run
-                # The current celery.py doesn't specify a pool, so it defaults to prefork
-                from app.core.celery import celery_app
-                
-                # Get the pool configuration (defaults to prefork if not specified)
-                pool_config = celery_app.conf.get('worker_pool', 'prefork')
-                
-                # On Windows with prefork, this fails
-                if pool_config == 'prefork':
-                    raise PermissionError(
-                        "[WinError 5] Access is denied: "
-                        "Cannot initialize prefork pool on Windows"
-                    )
+        # On Windows, selecting gevent or solo pool should succeed
+        with patch('platform.system', return_value='Windows'):
+            # This should not raise PermissionError
+            from app.core.celery import _get_worker_pool
+            
+            # Simulate being in a production environment
+            with patch.dict(os.environ, {"CELERY_ENV": "production"}):
+                # This call now includes the fix (process detection)
+                # If we mock the sys.argv to NOT be 'celery', it should skip patching
+                with patch('sys.argv', ['app.main']):
+                    pool_type = _get_worker_pool()
+                    assert pool_type == 'gevent'
+                    # Verify no monkey patching occurred in mock
+                    try:
+                        import gevent.monkey
+                        assert not gevent.monkey.is_patched("socket")
+                    except ImportError:
+                        # gevent is not installed, but the pool selection logic worked
+                        pytest.skip("gevent not installed")
 
     def test_counterexample_windows_multiple_workers_fail(self):
         """

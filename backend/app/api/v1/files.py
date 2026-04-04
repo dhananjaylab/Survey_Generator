@@ -37,7 +37,12 @@ def download_survey_doc(request: Request, filename: str):
     """
     logger.info("file_download_requested", filename=filename)
     
-    file_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "../../../questionnaires", filename))
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../questionnaires"))
+    file_path = os.path.abspath(os.path.join(base_dir, filename))
+    if not file_path.startswith(base_dir + os.sep) and file_path != base_dir:
+        logger.warning("path_traversal_attempt", filename=filename)
+        raise HTTPException(status_code=403, detail="Invalid filename")
+    
     if not os.path.exists(file_path):
         logger.warning("file_not_found", filename=filename, path=file_path)
         raise HTTPException(status_code=404, detail="File not found")

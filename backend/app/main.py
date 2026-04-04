@@ -120,6 +120,10 @@ All errors return standard JSON format:
 For issues or questions, contact: support@example.com
 """
 
+import os
+
+is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
+
 app = FastAPI(
     title="AI Survey Generator API",
     description=description,
@@ -141,7 +145,6 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "*",
     ],
     allow_credentials=True,
     allow_methods=["*"],

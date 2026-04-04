@@ -49,17 +49,22 @@ def _get_worker_pool():
             pool_type = 'gevent'
             logger.info("Windows production environment detected - using 'gevent' pool")
             # Apply gevent monkey-patching for production
-            # This patches standard library functions to work with gevent's async model
-            try:
-                from gevent import monkey
-                monkey.patch_all()
-                logger.info("Gevent monkey-patching applied successfully")
-            except ImportError:
-                logger.error(
-                    "Gevent pool selected but gevent is not installed. "
-                    "Install gevent with: pip install gevent>=23.0.0"
-                )
-                raise
+            # ONLY apply if running as a celery worker process to avoid corrupting web processes
+            import sys
+            is_celery = 'celery' in sys.argv[0] or any('celery' in arg for arg in sys.argv)
+            if is_celery or os.getenv('IS_CELERY_WORKER') == 'true':
+                try:
+                    from gevent import monkey
+                    monkey.patch_all()
+                    logger.info("Gevent monkey-patching applied successfully")
+                except ImportError:
+                    logger.error(
+                        "Gevent pool selected but gevent is not installed. "
+                        "Install gevent with: pip install gevent>=23.0.0"
+                    )
+                    raise
+            else:
+                logger.info("Skipping gevent monkey-patching (not running as Celery worker)")
     else:
         pool_type = 'prefork'
         logger.info(f"{system} platform detected - using 'prefork' pool")
