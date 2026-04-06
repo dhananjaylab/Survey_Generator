@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
 
   if (authHeader?.startsWith('Basic ')) {

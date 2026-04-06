@@ -10,7 +10,7 @@ interface ClientLayoutProps {
 }
 
 // Pages that don't require authentication
-const PUBLIC_PAGES = ['/login']
+const PUBLIC_PAGES = ['/login', '/']
 
 export default function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname()

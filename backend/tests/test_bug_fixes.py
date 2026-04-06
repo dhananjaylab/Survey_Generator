@@ -1,5 +1,6 @@
 import os
 import pytest
+from pydantic import ValidationError
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
@@ -43,17 +44,24 @@ class TestJWTSecretBug:
     """Test Bug 3: JWT Secret Validation."""
     
     def test_default_secret_rejected_in_production(self):
-        """Verify that default secret raises error in non-development env."""
-        with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
-            with patch("app.core.config.settings.SECRET_KEY", "your-secret-key-change-in-production"):
-                # We expect a RuntimeError from main.py if we re-import or trigger the check
-                # Since main.py already ran, we can check the logic directly
-                is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
-                secret = "your-secret-key-change-in-production"
-                if secret == "your-secret-key-change-in-production" and not is_development:
-                    assert True # Logic is correct
-                else:
-                    pytest.fail("Security check failed to identify insecure secret")
+        """Verify that default secret raises error in non-development env via Pydantic."""
+        from app.core.config import Settings
+        
+        # Test 1: Production + Default Secret -> Should fail
+        with patch.dict(os.environ, {"ENVIRONMENT": "production", "SECRET_KEY": "your-secret-key-change-in-production"}):
+            with pytest.raises(ValidationError) as exc:
+                Settings()
+            assert "SECURITY: Default SECRET_KEY used in non-development environment" in str(exc.value)
+            
+        # Test 2: Production + Strong Secret -> Should pass
+        with patch.dict(os.environ, {"ENVIRONMENT": "production", "SECRET_KEY": "a-very-strong-secure-secret-key"}):
+            settings = Settings()
+            assert settings.SECRET_KEY == "a-very-strong-secure-secret-key"
+            
+        # Test 3: Development + Default Secret -> Should pass (for local build ease)
+        with patch.dict(os.environ, {"ENVIRONMENT": "development", "SECRET_KEY": "your-secret-key-change-in-production"}):
+            settings = Settings()
+            assert settings.ENVIRONMENT == "development"
 
 class TestCeleryBug:
     """Test Bug 4: Celery Patch Isolation."""

@@ -1,6 +1,6 @@
 import { getAuthHeader, ensureAuthenticated, clearAuthToken, redirectToLogin } from './utils'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -97,14 +97,24 @@ async function apiFetch<T>(path: string, options: RequestInit = {}, retryCount =
     }
     
     // Check if this is a network error that should be retried
-    const isNetworkError = error instanceof TypeError && error.message.includes('fetch')
+    const isNetworkError = error instanceof TypeError && (
+      error.message.includes('fetch') || 
+      error.message.includes('NetworkError') || 
+      error.message.includes('Failed to fetch')
+    )
     
     if (isNetworkError && retryCount < RETRY_CONFIG.maxRetries) {
       const delay = getRetryDelay(retryCount)
-      console.warn(`Network error, retrying in ${delay}ms (attempt ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`)
+      console.warn(`Network error detected (Backend at ${API_BASE}):`, error.message)
+      console.warn(`Retrying in ${delay}ms (attempt ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`)
       
       await sleep(delay)
       return apiFetch<T>(path, options, retryCount + 1)
+    }
+    
+    if (isNetworkError) {
+      console.error(`Final network error reaching backend at ${API_BASE}:`, error)
+      throw new Error(`Cannot connect to backend API at ${API_BASE}. Please ensure the backend server is running and CORS is configured correctly.`)
     }
     
     throw error
@@ -273,7 +283,7 @@ export const api = {
 }
 
 export function createWebSocket(requestId: string): WebSocket {
-  const wsBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
+  const wsBase = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000')
     .replace(/^http:\/\//, 'ws://')
     .replace(/^https:\/\//, 'wss://')
   return new WebSocket(`${wsBase}/ws/survey/${requestId}`)

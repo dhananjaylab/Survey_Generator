@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     PROJECT_NAME: str 
+    ENVIRONMENT: str = "production"
     SECRET_KEY: str = "your-secret-key-change-in-production"  # Change in production!
     BASIC_AUTH_USERNAME: str = "admin"
     BASIC_AUTH_PASSWORD: str = "surveygen2024"
@@ -61,7 +62,7 @@ class Settings(BaseSettings):
         """
         Validate SECRET_KEY is not the default insecure value in production.
         """
-        is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
+        is_development = self.ENVIRONMENT.lower() == "development"
         if self.SECRET_KEY == "your-secret-key-change-in-production" and not is_development:
             raise ValueError(
                 "SECURITY: Default SECRET_KEY used in non-development environment. "
