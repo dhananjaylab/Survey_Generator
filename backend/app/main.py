@@ -120,6 +120,10 @@ All errors return standard JSON format:
 For issues or questions, contact: support@example.com
 """
 
+import os
+
+is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
+
 app = FastAPI(
     title="AI Survey Generator API",
     description=description,
@@ -141,7 +145,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "*",
+        "http://192.168.1.4:3000",
+        "http://localhost:3001",  # Alternative Next.js port
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -261,11 +266,11 @@ async def detailed_health_check():
     # Check Celery
     try:
         from app.core.celery import celery_app
-        from celery.exceptions import Timeout
+        from celery.exceptions import TimeoutError as CeleryTimeoutError
         
         # Try to inspect active workers
-        inspect = celery_app.control.inspect()
-        active_workers = inspect.active(timeout=2)
+        inspect = celery_app.control.inspect(timeout=2)
+        active_workers = inspect.active()
         
         if active_workers is None or len(active_workers) == 0:
             health_status["celery"] = "warning: no active workers"

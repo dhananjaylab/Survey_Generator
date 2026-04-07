@@ -1,12 +1,13 @@
 import os
 import logging
-from pydantic import field_validator, ValidationError
+from pydantic import field_validator, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     PROJECT_NAME: str 
+    ENVIRONMENT: str = "production"
     SECRET_KEY: str = "your-secret-key-change-in-production"  # Change in production!
     BASIC_AUTH_USERNAME: str = "admin"
     BASIC_AUTH_PASSWORD: str = "surveygen2024"
@@ -33,9 +34,9 @@ class Settings(BaseSettings):
     GPT3_FREQUENCY_PENALTY: float = 0.0
     GPT3_PRESENCE_PENALTY: float = 0.0
 
-    BusinessOverviewMaxToken: int = 200
+    BusinessOverviewMaxToken: int = 1000
     BusinessOverviewTemperature: float = 0.7
-    ResearchObjectivesMaxToken: int = 400
+    ResearchObjectivesMaxToken: int = 800
     ResearchObjectivesTemperature: float = 0.2
     QuestionnaireV2MaxToken: int = 1000
     MatrixOEMaxToken: int = 100
@@ -56,8 +57,21 @@ class Settings(BaseSettings):
     # Prompt config
     PROMPTS_BASE_PATH: str = "prompts/prompts_chatgpt"
     
+    @model_validator(mode='after')
+    def validate_secret_key(self):
+        """
+        Validate SECRET_KEY is not the default insecure value in production.
+        """
+        is_development = self.ENVIRONMENT.lower() == "development"
+        if self.SECRET_KEY == "your-secret-key-change-in-production" and not is_development:
+            raise ValueError(
+                "SECURITY: Default SECRET_KEY used in non-development environment. "
+                "Set a secure SECRET_KEY in your .env file."
+            )
+        return self
+
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=os.path.join(os.path.dirname(__file__), "..", ".env"), 
         env_file_encoding='utf-8',
         case_sensitive=False,  # Allow mixed case env variables
         extra='ignore'

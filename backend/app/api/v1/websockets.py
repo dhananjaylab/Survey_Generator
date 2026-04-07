@@ -26,9 +26,13 @@ async def survey_progress_websocket(websocket: WebSocket, request_id: str):
         while True:
             # Check if client is still connected
             try:
-                # This will raise an exception if client disconnected
-                await asyncio.wait_for(asyncio.sleep(0), timeout=0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+                # Use wait_for on receive to check for disconnects
+                # receive() will raise WebSocketDisconnect when the connection is closed
+                await asyncio.wait_for(websocket.receive(), timeout=0.01)
+            except asyncio.TimeoutError:
+                # Timeout is expected if no client messages are sent
+                pass
+            except WebSocketDisconnect:
                 logger.info("websocket_client_disconnected", request_id=request_id)
                 break
                 
