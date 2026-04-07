@@ -1,0 +1,26 @@
+{
+  "reporter": ["text", "json", "html"],
+  "reportsDirectory": "./coverage",
+  "exclude": [
+    "node_modules/",
+    "src/test/",
+    "e2e/",
+    "**/*.d.ts",
+    "**/*.config.*",
+    "dist/",
+    "**/*.test.{ts,tsx}",
+    "**/*.spec.{ts,tsx}",
+    "**/index.ts"
+  ],
+  "include": [
+    "src/**/*.{ts,tsx}"
+  ],
+  "thresholds": {
+    "global": {
+      "branches": 80,
+      "functions": 80,
+      "lines": 80,
+      "statements": 80
+    }
+  }
+}
