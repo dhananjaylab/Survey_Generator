@@ -64,6 +64,7 @@ export const ProjectSetupPage: React.FC = () => {
           company_name: formData.companyName,
           industry: formData.industry,
           existing_use_case: formData.useCase || '',
+          llm_model: formData.llmProvider || 'gpt',
         }),
       });
 

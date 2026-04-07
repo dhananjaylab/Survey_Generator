@@ -14,7 +14,6 @@ const ErrorPage = React.lazy(() => import('./pages').then(module => ({ default: 
 
 const ProjectSetupPage = React.lazy(() => import('./pages').then(module => ({ default: module.ProjectSetupPage })));
 const ResearchPage = React.lazy(() => import('./pages').then(module => ({ default: module.ResearchPage })));
-const GeneratePage = React.lazy(() => import('./pages').then(module => ({ default: module.GeneratePage })));
 const BuilderPage = React.lazy(() => import('./pages').then(module => ({ default: module.BuilderPage })));
 const PreviewPage = React.lazy(() => import('./pages').then(module => ({ default: module.PreviewPage })));
 
@@ -48,14 +47,6 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ResearchPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="generate"
-              element={
-                <ProtectedRoute>
-                  <GeneratePage />
                 </ProtectedRoute>
               }
             />

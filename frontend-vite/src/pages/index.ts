@@ -9,6 +9,5 @@ export { HomePage } from './HomePage';
 export { ErrorPage } from './ErrorPage';
 export { ProjectSetupPage } from './ProjectSetupPage';
 export { ResearchPage } from './ResearchPage';
-export { GeneratePage } from './GeneratePage';
 export { BuilderPage } from './BuilderPage';
 export { PreviewPage } from './PreviewPage';

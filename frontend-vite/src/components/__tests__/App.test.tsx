@@ -21,7 +21,6 @@ vi.mock('@/pages', () => ({
   ErrorPage: () => <div>Error Page</div>,
   ProjectSetupPage: () => <div>Project Setup Page</div>,
   ResearchPage: () => <div>Research Page</div>,
-  GeneratePage: () => <div>Generate Page</div>,
   BuilderPage: () => <div>Builder Page</div>,
   PreviewPage: () => <div>Preview Page</div>,
 }))

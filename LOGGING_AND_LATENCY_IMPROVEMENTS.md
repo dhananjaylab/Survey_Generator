@@ -26,7 +26,15 @@ LLM_CALL_START: Using gpt-4 (OpenAI GPT)
 LLM_CALL_COMPLETE: gpt-4 responded in 2.34s (1523 chars)
 ```
 
-### 4. Latency Optimization
+### 4. Use Case Generation Ignoring LLM Selection
+**Problem**: The "Generate Use Case with AI" button always used GPT, ignoring the user's AI Provider selection.
+
+**Solution**: 
+- **Frontend**: Added `llm_model: formData.llmProvider` to the API request in `ProjectSetupPage.tsx`
+- **Backend**: Changed from hardcoded `llm_model="gpt"` to `llm_model = req.get("llm_model", "gpt")` in the `/generate-use-case` endpoint
+- **Result**: Use case generation now respects the user's AI Provider selection
+
+### 5. Latency Optimization
 **Problem**: Sequential execution of extra questions and video questions caused unnecessary delays.
 
 **Solution**: 
@@ -45,6 +53,14 @@ LLM_CALL_COMPLETE: gpt-4 responded in 2.34s (1523 chars)
 - Parallelized extra question generation (Matrix + Open-ended)
 - Made video question generation run concurrently with filtering
 - Clarified SUCCESS message publishing
+
+### `backend/app/api/v1/router.py`
+- Updated `/generate-use-case` endpoint to accept and use `llm_model` parameter
+- Added logging to show which LLM is being used for use case generation
+
+### `frontend-vite/src/pages/ProjectSetupPage.tsx`
+- Added `llm_model` parameter to the use case generation API request
+- Now passes the user's selected AI Provider to the backend
 
 ## Performance Impact
 

@@ -60,8 +60,9 @@ async def generate_use_case(request: Request, req: dict):
     company_name = req.get("company_name", "")
     industry = req.get("industry", "")
     existing_use_case = req.get("existing_use_case", "")
+    llm_model = req.get("llm_model", "gpt")
     
-    logger.info("use_case_generation_requested", project_name=project_name, company_name=company_name, industry=industry)
+    logger.info("use_case_generation_requested", project_name=project_name, company_name=company_name, industry=industry, llm_model=llm_model)
     
     # Create a prompt to generate use case
     prompt = f"""Generate a concise and descriptive use case for a survey project with the following details:
@@ -83,12 +84,12 @@ Generate a 2-3 sentence use case description that explains:
 
 Keep it professional and specific to the industry. Do not include any preamble or explanation, just the use case description."""
 
-    service = AIService(llm_model="gpt")  # Use GPT for quick generation
+    service = AIService(llm_model=llm_model)
     try:
         await service.initialize()
         messages = [{"role": "user", "content": prompt}]
         use_case = await service._call_llm(messages=messages, temperature=0.7, max_tokens=200)
-        logger.info("use_case_generated", project_name=project_name, company_name=company_name)
+        logger.info("use_case_generated", project_name=project_name, company_name=company_name, llm_model=llm_model)
         return {"success": 1, "use_case": use_case.strip()}
     except Exception as e:
         logger.error("use_case_generation_error", error=str(e))
