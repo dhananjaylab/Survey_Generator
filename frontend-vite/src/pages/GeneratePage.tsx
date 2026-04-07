@@ -96,25 +96,52 @@ export const GeneratePage: React.FC = () => {
     
     try {
       const response = await ApiEndpoints.getSurveyStatus(requestId);
+      console.log('📊 Survey Status Response:', response);
+      console.log('📊 Response pages:', response.pages);
+      console.log('📊 Is pages an array?', Array.isArray(response.pages));
+      
       if (response.status === 'COMPLETED' && response.pages) {
-        // Convert backend survey data to frontend Survey format
-        const survey: Survey = {
-          id: requestId,
-          title: currentProject?.projectName || 'Draft Survey',
-          description: businessOverview || 'Survey Description',
-          pages: Array.isArray(response.pages) ? response.pages.map((page: any) => ({
-            id: page.name || `page-${Math.random()}`,
-            name: page.name || 'page1',
-            title: page.title || 'Page',
-            questions: (page.elements || []).map((element: any) => ({
-              id: element.surveyQID || element.name || `q-${Math.random()}`,
+        // Backend creates one page per question, but frontend expects all questions in one page
+        // So we need to consolidate all elements from all pages into a single page
+        const pages = Array.isArray(response.pages) ? response.pages : [];
+        console.log('📊 Processing', pages.length, 'backend pages (one per question)');
+        
+        // Collect all questions from all pages
+        const allQuestions: any[] = [];
+        pages.forEach((page: any, pageIndex: number) => {
+          const elements = page.elements || [];
+          console.log(`📊 Page ${pageIndex} has ${elements.length} elements`);
+          
+          elements.forEach((element: any, elemIndex: number) => {
+            console.log(`📊 Element ${elemIndex}:`, element);
+            allQuestions.push({
+              id: element.surveyQID || element.name || `q-${Date.now()}-${elemIndex}`,
               type: mapQuestionType(element.type),
               title: stripHtmlTags(element.title || ''),
               description: element.description || '',
               required: element.isRequired || false,
               choices: mapChoices(element),
-            })),
-          })) : [],
+            });
+          });
+        });
+        
+        console.log('📊 Total questions collected:', allQuestions.length);
+        
+        // Create a single page with all questions
+        const consolidatedPages = [{
+          id: 'page1',
+          name: 'page1',
+          title: 'Survey Questions',
+          questions: allQuestions,
+        }];
+        
+        console.log('📊 Consolidated into 1 page with', allQuestions.length, 'questions');
+        
+        const survey: Survey = {
+          id: requestId,
+          title: currentProject?.projectName || 'Draft Survey',
+          description: businessOverview || 'Survey Description',
+          pages: consolidatedPages,
           settings: {
             showProgressBar: true,
             showQuestionNumbers: true,
@@ -123,15 +150,18 @@ export const GeneratePage: React.FC = () => {
           },
         };
         
+        console.log('📊 Final survey object:', survey);
         setCurrentSurvey(survey);
+        
+        const totalQuestions = survey.pages.reduce((acc, p) => acc + p.questions.length, 0);
         addNotification({
           type: 'success',
           title: 'Survey Loaded',
-          message: `${survey.pages.length} pages with ${survey.pages.reduce((acc, p) => acc + p.questions.length, 0)} questions loaded.`,
+          message: `${totalQuestions} questions loaded successfully.`,
         });
       }
     } catch (error: any) {
-      console.error('Failed to fetch survey:', error);
+      console.error('❌ Failed to fetch survey:', error);
       addNotification({
         type: 'error',
         title: 'Load Failed',
