@@ -34,7 +34,8 @@ export const useAuthStore = create<AuthStore>()(
             isAuthenticated: true,
             isLoading: false,
           });
-          // Note: setUser would typically be called here after fetching user info
+          // Sync tokens to both storage locations for compatibility
+          localStorage.setItem('auth-tokens', JSON.stringify(tokens));
         } catch (error: any) {
           set({
             error: error.detail || 'Login failed',
@@ -53,6 +54,8 @@ export const useAuthStore = create<AuthStore>()(
             isAuthenticated: true,
             isLoading: false,
           });
+          // Sync tokens to both storage locations for compatibility
+          localStorage.setItem('auth-tokens', JSON.stringify(tokens));
         } catch (error: any) {
           set({
             error: error.detail || 'Registration failed',
@@ -64,6 +67,8 @@ export const useAuthStore = create<AuthStore>()(
 
       logout: () => {
         AuthService.logout();
+        // Clear both storage locations
+        localStorage.removeItem('auth-tokens');
         set({
           user: null,
           tokens: null,

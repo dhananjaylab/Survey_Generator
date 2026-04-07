@@ -326,7 +326,19 @@ class AsyncTask(Task):
         try:
             return loop.run_until_complete(self.run(*args, **kwargs))
         finally:
-            loop.close()
+            # Give pending tasks a chance to complete
+            try:
+                # Cancel all remaining tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # Wait for all tasks to be cancelled
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception as e:
+                logger.warning(f"Error during loop cleanup: {e}")
+            finally:
+                loop.close()
 
 @celery_app.task(
     bind=True,

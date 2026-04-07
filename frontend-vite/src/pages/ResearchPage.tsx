@@ -24,14 +24,17 @@ export const ResearchPage: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      // Simulate API call to generate business overview using currentProject
+      // Build request with snake_case field names to match backend
       const response = await ApiEndpoints.generateBusinessOverview({
-        requestId: Math.random().toString(36).substring(7),
-        ...currentProject,
-        llmModel: 'gpt-4o', // default model
+        request_id: Math.random().toString(36).substring(7),
+        project_name: currentProject.projectName,
+        company_name: currentProject.companyName,
+        industry: currentProject.industry,
+        use_case: currentProject.useCase,
+        llm_model: currentProject.llmProvider || 'gpt', // Use selected provider
       });
       
-      const newOverview = response.businessOverview;
+      const newOverview = response.business_overview;
       setLocalOverview(newOverview);
       setBusinessOverview(newOverview);
       addNotification({

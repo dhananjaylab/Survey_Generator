@@ -57,9 +57,25 @@ class AIService:
         )
         
     async def close(self):
-        """Close Redis connection"""
+        """Close Redis connection and API clients"""
         if self.redis:
             await self.redis.close()
+        
+        # Close Gemini client if it exists
+        if self.llm_model == "gemini" and hasattr(self, 'gemini_client'):
+            try:
+                # The google-genai client has an aclose method
+                if hasattr(self.gemini_client, 'aclose'):
+                    await self.gemini_client.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing Gemini client: {e}")
+        
+        # Close OpenAI client if it exists
+        if self.llm_model == "gpt" and hasattr(self, 'client'):
+            try:
+                await self.client.close()
+            except Exception as e:
+                logger.warning(f"Error closing OpenAI client: {e}")
     
     def _generate_cache_key(self, prefix: str, **kwargs) -> str:
         content = json.dumps(kwargs, sort_keys=True)

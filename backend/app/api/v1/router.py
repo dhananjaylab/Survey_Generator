@@ -51,6 +51,51 @@ async def get_business_overview(request: Request, req: BusinessOverviewRequest):
     finally:
         await service.close()
 
+@router.post("/generate-use-case")
+@limiter.limit("20/minute")
+async def generate_use_case(request: Request, req: dict):
+    """Generate a descriptive use case based on project details"""
+    project_name = req.get("project_name", "")
+    company_name = req.get("company_name", "")
+    industry = req.get("industry", "")
+    existing_use_case = req.get("existing_use_case", "")
+    
+    logger.info("use_case_generation_requested", project_name=project_name, company_name=company_name, industry=industry)
+    
+    # Create a prompt to generate use case
+    prompt = f"""Generate a concise and descriptive use case for a survey project with the following details:
+
+Project Name: {project_name}
+Company Name: {company_name}
+Industry: {industry}
+"""
+    
+    if existing_use_case:
+        prompt += f"\nExisting Use Case (enhance this): {existing_use_case}"
+    
+    prompt += """
+
+Generate a 2-3 sentence use case description that explains:
+1. What the survey aims to achieve
+2. Who the target audience is
+3. What insights or outcomes are expected
+
+Keep it professional and specific to the industry. Do not include any preamble or explanation, just the use case description."""
+
+    service = AIService(llm_model="gpt")  # Use GPT for quick generation
+    try:
+        await service.initialize()
+        messages = [{"role": "user", "content": prompt}]
+        use_case = await service._call_llm(messages=messages, temperature=0.7, max_tokens=200)
+        logger.info("use_case_generated", project_name=project_name, company_name=company_name)
+        return {"success": 1, "use_case": use_case.strip()}
+    except Exception as e:
+        logger.error("use_case_generation_error", error=str(e))
+        metrics.record_error(type(e).__name__)
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        await service.close()
+
 @router.post("/research-objectives")
 @limiter.limit("20/minute")
 async def get_research_objectives(request: Request, req: ResearchObjectiveRequest):

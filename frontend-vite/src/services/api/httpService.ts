@@ -37,11 +37,19 @@ class HttpService {
     // Request interceptor for auth token
     this.client.interceptors.request.use(
       (config) => {
+        console.log('🔍 [httpService] Request to:', config.url);
+        
         // Get tokens from localStorage (will be replaced with store access later)
         const storedTokens = this.getStoredTokens();
-        if (storedTokens?.accessToken) {
-          config.headers.Authorization = `Bearer ${storedTokens.accessToken}`;
+        console.log('🔍 [httpService] Tokens retrieved:', storedTokens ? 'Yes' : 'No');
+        
+        if (storedTokens?.access_token) {  // Backend uses snake_case
+          config.headers.Authorization = `Bearer ${storedTokens.access_token}`;
+          console.log('✅ [httpService] Authorization header added');
+        } else {
+          console.warn('⚠️ [httpService] No token available for request');
         }
+        
         return config;
       },
       (error) => Promise.reject(error)
@@ -114,20 +122,50 @@ class HttpService {
 
   private getStoredTokens(): AuthTokens | null {
     try {
-      const stored = localStorage.getItem('auth-store');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return parsed.state?.tokens || null;
+      console.log('🔍 [httpService] Getting stored tokens...');
+      
+      // First, try to get from Zustand persist store
+      const zustandStore = localStorage.getItem('auth-store');
+      console.log('🔍 [httpService] auth-store exists:', !!zustandStore);
+      
+      if (zustandStore) {
+        const parsed = JSON.parse(zustandStore);
+        console.log('🔍 [httpService] auth-store parsed:', Object.keys(parsed));
+        const tokens = parsed.state?.tokens || parsed.tokens;
+        console.log('🔍 [httpService] tokens from auth-store:', tokens ? 'Found' : 'Not found');
+        
+        if (tokens?.access_token) {  // Backend uses snake_case
+          console.log('✅ [httpService] Using tokens from auth-store');
+          return tokens;
+        }
       }
+
+      // Fallback: try to get from auth-tokens (AuthService storage)
+      const authTokens = localStorage.getItem('auth-tokens');
+      console.log('🔍 [httpService] auth-tokens exists:', !!authTokens);
+      
+      if (authTokens) {
+        const tokens = JSON.parse(authTokens);
+        console.log('🔍 [httpService] tokens from auth-tokens:', tokens ? 'Found' : 'Not found');
+        
+        if (tokens?.access_token) {  // Backend uses snake_case
+          console.log('✅ [httpService] Using tokens from auth-tokens');
+          return tokens;
+        }
+      }
+
+      console.warn('⚠️ [httpService] No valid tokens found in localStorage');
     } catch (error) {
-      console.error('Failed to get stored tokens:', error);
+      console.error('❌ [httpService] Failed to get stored tokens:', error);
     }
     return null;
   }
 
   private clearStoredTokens(): void {
     try {
+      // Clear both storage locations
       localStorage.removeItem('auth-store');
+      localStorage.removeItem('auth-tokens');
     } catch (error) {
       console.error('Failed to clear stored tokens:', error);
     }

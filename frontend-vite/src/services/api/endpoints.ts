@@ -1,4 +1,6 @@
 import { httpService } from './httpService';
+// Temporary: Import debug version for troubleshooting
+// import { httpServiceDebug as httpService } from './httpService.debug';
 import type {
   LoginCredentials,
   RegisterData,
@@ -15,7 +17,10 @@ import type {
 export class ApiEndpoints {
   // Authentication endpoints
   static async login(credentials: LoginCredentials): Promise<AuthTokens> {
-    return httpService.post<AuthTokens>('/api/v1/auth/login', credentials);
+    console.log('🔐 [API] Login request:', credentials.username);
+    const result = await httpService.post<AuthTokens>('/api/v1/auth/login', credentials);
+    console.log('✅ [API] Login successful, token received');
+    return result;
   }
 
   static async register(data: RegisterData): Promise<AuthTokens> {
@@ -24,7 +29,27 @@ export class ApiEndpoints {
 
   // Survey endpoints
   static async generateBusinessOverview(request: BusinessOverviewRequest): Promise<BusinessOverviewResponse> {
-    return httpService.post<BusinessOverviewResponse>('/api/v1/surveys/business-overview', request);
+    console.log('📊 [API] Generating business overview...');
+    console.log('📊 [API] Request data:', request);
+    
+    // Check localStorage before making request
+    const authStore = localStorage.getItem('auth-store');
+    const authTokens = localStorage.getItem('auth-tokens');
+    console.log('📊 [API] auth-store exists:', !!authStore);
+    console.log('📊 [API] auth-tokens exists:', !!authTokens);
+    
+    if (authStore) {
+      const parsed = JSON.parse(authStore);
+      console.log('📊 [API] auth-store tokens:', parsed.state?.tokens ? 'Found' : 'Not found');
+    }
+    if (authTokens) {
+      const parsed = JSON.parse(authTokens);
+      console.log('📊 [API] auth-tokens:', parsed.accessToken ? 'Found' : 'Not found');
+    }
+    
+    const result = await httpService.post<BusinessOverviewResponse>('/api/v1/surveys/business-overview', request);
+    console.log('✅ [API] Business overview generated');
+    return result;
   }
 
   static async generateResearchObjectives(request: ResearchObjectiveRequest): Promise<any> {

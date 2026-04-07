@@ -19,9 +19,76 @@ export const ProjectSetupPage: React.FC = () => {
     companyName: currentProject?.companyName || '',
     industry: currentProject?.industry || 'technology',
     useCase: currentProject?.useCase || '',
+    llmProvider: currentProject?.llmProvider || 'gpt',
   });
 
   const [errors, setErrors] = React.useState<Record<string, string>>({});
+  const [isGeneratingUseCase, setIsGeneratingUseCase] = React.useState(false);
+
+  const generateUseCase = async () => {
+    if (!formData.projectName || !formData.companyName) {
+      addNotification({
+        type: 'error',
+        title: 'Missing Information',
+        message: 'Please provide Project Name and Company Name first.',
+      });
+      return;
+    }
+
+    setIsGeneratingUseCase(true);
+    try {
+      // Get token from storage
+      let token = '';
+      const authStore = localStorage.getItem('auth-store');
+      if (authStore) {
+        const parsed = JSON.parse(authStore);
+        token = parsed.state?.tokens?.access_token || '';
+      }
+      
+      if (!token) {
+        const authTokens = localStorage.getItem('auth-tokens');
+        if (authTokens) {
+          const parsed = JSON.parse(authTokens);
+          token = parsed.access_token || '';
+        }
+      }
+
+      const response = await fetch('http://localhost:8000/api/v1/surveys/generate-use-case', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          project_name: formData.projectName,
+          company_name: formData.companyName,
+          industry: formData.industry,
+          existing_use_case: formData.useCase || '',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate use case');
+      }
+
+      const data = await response.json();
+      setFormData((prev) => ({ ...prev, useCase: data.use_case }));
+      
+      addNotification({
+        type: 'success',
+        title: 'Use Case Generated',
+        message: 'AI has generated a use case description for your project.',
+      });
+    } catch (error: any) {
+      addNotification({
+        type: 'error',
+        title: 'Generation Failed',
+        message: error.message || 'Failed to generate use case. Please try again.',
+      });
+    } finally {
+      setIsGeneratingUseCase(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -95,22 +162,72 @@ export const ProjectSetupPage: React.FC = () => {
                 options={[
                   { value: 'technology', label: 'Technology' },
                   { value: 'healthcare', label: 'Healthcare' },
-                  { value: 'finance', label: 'Finance' },
+                  { value: 'finance', label: 'Finance & Banking' },
                   { value: 'education', label: 'Education' },
-                  { value: 'retail', label: 'Retail' },
+                  { value: 'retail', label: 'Retail & E-commerce' },
+                  { value: 'manufacturing', label: 'Manufacturing' },
+                  { value: 'hospitality', label: 'Hospitality & Tourism' },
+                  { value: 'real-estate', label: 'Real Estate' },
+                  { value: 'automotive', label: 'Automotive' },
+                  { value: 'telecommunications', label: 'Telecommunications' },
+                  { value: 'media', label: 'Media & Entertainment' },
+                  { value: 'energy', label: 'Energy & Utilities' },
+                  { value: 'transportation', label: 'Transportation & Logistics' },
+                  { value: 'agriculture', label: 'Agriculture' },
+                  { value: 'construction', label: 'Construction' },
+                  { value: 'pharmaceutical', label: 'Pharmaceutical' },
+                  { value: 'insurance', label: 'Insurance' },
+                  { value: 'legal', label: 'Legal Services' },
+                  { value: 'consulting', label: 'Consulting' },
+                  { value: 'non-profit', label: 'Non-Profit' },
+                  { value: 'government', label: 'Government' },
                   { value: 'other', label: 'Other' },
                 ]}
               />
             </FormField>
 
             <FormField label="Use Case" error={errors.useCase}>
-              <Textarea
-                name="useCase"
-                value={formData.useCase}
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Textarea
+                    name="useCase"
+                    value={formData.useCase}
+                    onChange={handleChange}
+                    placeholder="Briefly describe what you want to achieve with this survey..."
+                    rows={4}
+                    className="flex-1"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={generateUseCase}
+                  disabled={isGeneratingUseCase || !formData.projectName || !formData.companyName}
+                >
+                  {isGeneratingUseCase ? 'Generating...' : '✨ Generate Use Case with AI'}
+                </Button>
+                {!formData.projectName || !formData.companyName ? (
+                  <p className="text-xs text-gray-500">
+                    Please fill in Project Name and Company Name first
+                  </p>
+                ) : null}
+              </div>
+            </FormField>
+
+            <FormField label="AI Provider" error={errors.llmProvider}>
+              <Select
+                name="llmProvider"
+                value={formData.llmProvider}
                 onChange={handleChange}
-                placeholder="Briefly describe what you want to achieve with this survey..."
-                rows={4}
+                options={[
+                  { value: 'gpt', label: 'OpenAI GPT' },
+                  { value: 'gemini', label: 'Google Gemini' },
+                ]}
               />
+              <p className="mt-1 text-sm text-gray-500">
+                Select the AI model to use for generating your survey
+              </p>
             </FormField>
 
             <div className="flex justify-end gap-4 pt-4 border-t border-gray-200">

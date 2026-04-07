@@ -41,6 +41,7 @@ export class AuthService {
    * Check if user is authenticated (has tokens)
    */
   static isAuthenticated(): boolean {
-    return this.getTokens() !== null;
+    const tokens = this.getTokens();
+    return tokens !== null && !!tokens.access_token;
   }
 }

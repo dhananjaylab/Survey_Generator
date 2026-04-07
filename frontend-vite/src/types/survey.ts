@@ -1,30 +1,32 @@
 // Survey Type Definitions
 // This file contains all survey-related TypeScript interfaces and types
+// Note: Backend uses snake_case, so we match that format
 
 export interface ProjectSetupData {
   projectName: string;
   companyName: string;
   industry: string;
   useCase: string;
+  llmProvider: 'gpt' | 'gemini';
 }
 
 export interface BusinessOverviewRequest {
-  requestId: string;
-  projectName: string;
-  companyName: string;
+  request_id: string;
+  project_name: string;
+  company_name: string;
   industry: string;
-  useCase: string;
-  llmModel: string;
+  use_case: string;
+  llm_model: string;
 }
 
 export interface BusinessOverviewResponse {
   success: number;
-  requestId: string;
-  projectName: string;
-  companyName: string;
-  businessOverview: string;
+  request_id: string;
+  project_name: string;
+  company_name: string;
+  business_overview: string;
   industry: string;
-  useCase: string;
+  use_case: string;
 }
 
 export interface Question {
@@ -65,36 +67,36 @@ export interface SurveySettings {
 }
 
 export interface ResearchObjectiveRequest {
-  requestId: string;
-  projectName: string;
-  companyName: string;
-  businessOverview: string;
+  request_id: string;
+  project_name: string;
+  company_name: string;
+  business_overview: string;
   industry: string;
-  useCase: string;
-  llmModel: string;
+  use_case: string;
+  llm_model: string;
 }
 
 export interface SurveyGenerationRequest {
-  requestId: string;
-  projectName: string;
-  companyName: string;
-  businessOverview: string;
-  researchObjectives: string;
+  request_id: string;
+  project_name: string;
+  company_name: string;
+  business_overview: string;
+  research_objectives: string;
   industry: string;
-  useCase: string;
-  llmModel: string;
+  use_case: string;
+  llm_model: string;
 }
 
 export interface SurveyStatusResponse {
   success: number;
   status: 'PENDING' | 'STARTING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-  requestId: string;
-  projectName: string;
-  companyName: string;
-  researchObjectives: string;
-  businessOverview: string;
+  request_id: string;
+  project_name: string;
+  company_name: string;
+  research_objectives: string;
+  business_overview: string;
   industry: string;
-  useCase: string;
+  use_case: string;
   pages: any;
-  docLink: string;
+  doc_link: string;
 }

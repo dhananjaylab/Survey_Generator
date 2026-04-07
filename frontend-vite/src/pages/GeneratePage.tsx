@@ -61,16 +61,16 @@ export const GeneratePage: React.FC = () => {
     setRequestId(newReqId);
 
     try {
-      // Mock triggering the generation pipeline
+      // Trigger the generation pipeline with snake_case field names
       await ApiEndpoints.generateSurvey({
-        requestId: newReqId,
-        projectName: currentProject.projectName,
-        companyName: currentProject.companyName,
+        request_id: newReqId,
+        project_name: currentProject.projectName,
+        company_name: currentProject.companyName,
         industry: currentProject.industry,
-        useCase: currentProject.useCase,
-        businessOverview: businessOverview,
-        researchObjectives: 'Generate standard research objectives.',
-        llmModel: 'gpt-4o'
+        use_case: currentProject.useCase,
+        business_overview: businessOverview,
+        research_objectives: 'Generate standard research objectives.',
+        llm_model: currentProject.llmProvider || 'gpt' // Use selected provider
       });
       setProgressLog(prev => [...prev, 'Survey generation triggered successfully. Awaiting updates...']);
     } catch (err: any) {

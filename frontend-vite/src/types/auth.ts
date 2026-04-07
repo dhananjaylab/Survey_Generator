@@ -19,8 +19,8 @@ export interface RegisterData {
 }
 
 export interface AuthTokens {
-  accessToken: string;
-  tokenType: string;
+  access_token: string;  // Backend uses snake_case
+  token_type: string;
 }
 
 export interface AuthState {
