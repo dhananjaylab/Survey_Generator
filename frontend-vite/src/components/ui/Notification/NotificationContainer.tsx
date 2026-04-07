@@ -6,6 +6,28 @@ import { cn } from '@/utils/cn';
 export const NotificationContainer: React.FC = () => {
   const { notifications, removeNotification } = useUIStore();
 
+  // Auto-dismiss notifications after their specified duration (default 5 seconds)
+  React.useEffect(() => {
+    const timers = new Map<string, NodeJS.Timeout>();
+
+    notifications.forEach((notification) => {
+      // Skip if timer already exists for this notification
+      if (timers.has(notification.id)) return;
+
+      const duration = notification.duration ?? 5000; // Default 5 seconds
+      const timer = setTimeout(() => {
+        removeNotification(notification.id);
+      }, duration);
+      
+      timers.set(notification.id, timer);
+    });
+
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, [notifications, removeNotification]);
+
   return (
     <div
       aria-live="assertive"

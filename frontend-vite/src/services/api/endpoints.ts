@@ -12,6 +12,8 @@ import type {
   ResearchObjectiveRequest,
   SurveyGenerationRequest,
   SurveyStatusResponse,
+  RegenerateSurveyDocRequest,
+  RegenerateSurveyDocResponse,
 } from '@/types/survey';
 
 export class ApiEndpoints {
@@ -66,6 +68,10 @@ export class ApiEndpoints {
 
   static async getSurveyStatus(requestId: string): Promise<SurveyStatusResponse> {
     return httpService.get<SurveyStatusResponse>(`/api/v1/surveys/status/${requestId}`);
+  }
+
+  static async regenerateSurveyDocument(request: RegenerateSurveyDocRequest): Promise<RegenerateSurveyDocResponse> {
+    return httpService.post<RegenerateSurveyDocResponse>('/api/v1/surveys/regenerate-document', request);
   }
 
   // File endpoints

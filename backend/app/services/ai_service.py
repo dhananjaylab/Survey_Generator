@@ -101,17 +101,28 @@ class AIService:
     )
     async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None) -> str:
         """Call the configured LLM (OpenAI GPT or Google Gemini)."""
+        call_start = time.time()
         try:
             if self.llm_model == "gpt":
+                model_name = settings.CHATGPT_MODEL
+                logger.info(f"LLM_CALL_START: Using {model_name} (OpenAI GPT)")
+                
                 # OpenAI API call
                 response = await self.client.chat.completions.create(
-                    model=settings.CHATGPT_MODEL,
+                    model=model_name,
                     messages=messages,
                     temperature=temperature or 0.7,
                     max_tokens=max_tokens or 2000,
                 )
-                return response.choices[0].message.content.strip()
+                result = response.choices[0].message.content.strip()
+                
+                elapsed = time.time() - call_start
+                logger.info(f"LLM_CALL_COMPLETE: {model_name} responded in {elapsed:.2f}s ({len(result)} chars)")
+                return result
             else:  # gemini - using latest google-genai SDK
+                model_name = self.gemini_model_name
+                logger.info(f"LLM_CALL_START: Using {model_name} (Google Gemini)")
+                
                 # Convert OpenAI message format to Gemini content format
                 contents = []
                 for msg in messages:
@@ -128,16 +139,21 @@ class AIService:
                 
                 # Call Gemini API using google-genai SDK
                 response = self.gemini_client.models.generate_content(
-                    model=self.gemini_model_name,
+                    model=model_name,
                     contents=contents,
                     config={
                         "temperature": temperature or 0.7,
                         "max_output_tokens": max_tokens or 2000,
                     }
                 )
-                return response.text.strip()
+                result = response.text.strip()
+                
+                elapsed = time.time() - call_start
+                logger.info(f"LLM_CALL_COMPLETE: {model_name} responded in {elapsed:.2f}s ({len(result)} chars)")
+                return result
         except Exception as e:
-            logger.error(f"LLM API error ({self.llm_model}): {e}")
+            elapsed = time.time() - call_start
+            logger.error(f"LLM_CALL_FAILED: {self.llm_model} failed after {elapsed:.2f}s - {e}")
             raise
     
     async def generate_business_overview(self, company_name: str, use_cache: bool = True) -> str:

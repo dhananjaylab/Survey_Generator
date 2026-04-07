@@ -10,7 +10,7 @@ import type { Survey, Choice } from '@/types/survey';
 
 export const GeneratePage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentProject, businessOverview, isGenerating, setIsGenerating, setError, setCurrentSurvey } = useSurveyStore();
+  const { currentProject, businessOverview, isGenerating, setIsGenerating, setError, setCurrentSurvey, setCurrentSurveyDocLink } = useSurveyStore();
   const { addNotification } = useUIStore();
   const [progressLog, setProgressLog] = React.useState<string[]>([]);
   const [requestId, setRequestId] = React.useState<string>('');
@@ -152,6 +152,12 @@ export const GeneratePage: React.FC = () => {
         
         console.log('📊 Final survey object:', survey);
         setCurrentSurvey(survey);
+        
+        // Store the doc_link for downloading
+        if (response.doc_link) {
+          console.log('📊 Storing doc_link:', response.doc_link);
+          setCurrentSurveyDocLink(response.doc_link);
+        }
         
         const totalQuestions = survey.pages.reduce((acc, p) => acc + p.questions.length, 0);
         addNotification({

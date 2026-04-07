@@ -100,3 +100,20 @@ export interface SurveyStatusResponse {
   pages: any;
   doc_link: string;
 }
+
+
+export interface RegenerateSurveyDocRequest {
+  request_id: string;
+  project_name: string;
+  company_name: string;
+  survey_title: string;
+  survey_description: string;
+  pages: any[];
+}
+
+export interface RegenerateSurveyDocResponse {
+  success: number;
+  request_id: string;
+  doc_link: string;
+  message: string;
+}

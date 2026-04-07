@@ -26,7 +26,9 @@ async def publish_progress(request_id: str, message: str):
         request_id: Unique request identifier
         message: Progress message to publish
     """
-    logger.info("progress_update", request_id=request_id, message=message)
+    # Use time.time() for unique timestamps
+    timestamp = time.strftime("%I:%M:%S %p", time.localtime())
+    logger.info("progress_update", request_id=request_id, message=message, timestamp=timestamp)
     try:
         r = await asyncio.wait_for(aioredis.from_url(settings.REDIS_URL, decode_responses=True), timeout=2.0)
         await r.publish(f"survey_progress_{request_id}", message)
@@ -127,29 +129,44 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         # Publish QUESTIONS_GENERATED message
         await publish_progress(request_id, f"QUESTIONS_GENERATED: {len(parsed_questions)} questions")
 
-        # STEP 2: Extra Questions
+        # STEP 2: Extra Questions (Parallel Generation)
         step_start = time.time()
         await publish_progress(request_id, "Adding Matrix and Open-ended questions if necessary...")
         matrix_count = sum(1 for q in parsed_questions if q["type"] == "Matrix")
         oe_count = sum(1 for q in parsed_questions if q["type"] == "Open-ended")
         logger.info("extra_questions_step_started", request_id=request_id, matrix_count=matrix_count, oe_count=oe_count)
         
+        # Generate all extra questions in parallel for better performance
+        extra_tasks = []
         idx = len(parsed_questions)
-        while matrix_count < settings.MinMatrixQuestions:
+        
+        # Prepare Matrix questions
+        matrix_needed = max(0, settings.MinMatrixQuestions - matrix_count)
+        for i in range(matrix_needed):
             idx += 1
-            logger.info("adding_matrix_question", request_id=request_id, current=matrix_count + 1, target=settings.MinMatrixQuestions)
-            new_q = await ai_service.generate_extra_question(company_name, business_overview, research_objectives, questionnaire_str, idx, "Matrix")
-            questionnaire_str += f"\n{new_q}"
-            parsed_questions.append({"type": "Matrix", "question": new_q.split("]", 1)[1].strip(), "choices": []})
-            matrix_count += 1
+            extra_tasks.append(("Matrix", idx, ai_service.generate_extra_question(
+                company_name, business_overview, research_objectives, questionnaire_str, idx, "Matrix"
+            )))
+        
+        # Prepare Open-ended questions
+        oe_needed = max(0, settings.MinMatrixOEQuestions - oe_count)
+        for i in range(oe_needed):
+            idx += 1
+            extra_tasks.append(("Open-ended", idx, ai_service.generate_extra_question(
+                company_name, business_overview, research_objectives, questionnaire_str, idx, "Open-ended"
+            )))
+        
+        # Execute all in parallel
+        if extra_tasks:
+            logger.info("generating_extra_questions_parallel", request_id=request_id, count=len(extra_tasks))
+            results = await asyncio.gather(*[task[2] for task in extra_tasks], return_exceptions=True)
             
-        while oe_count < settings.MinMatrixOEQuestions:
-            idx += 1
-            logger.info("adding_oe_question", request_id=request_id, current=oe_count + 1, target=settings.MinMatrixOEQuestions)
-            new_q = await ai_service.generate_extra_question(company_name, business_overview, research_objectives, questionnaire_str, idx, "Open-ended")
-            questionnaire_str += f"\n{new_q}"
-            parsed_questions.append({"type": "Open-ended", "question": new_q.split("]", 1)[1].strip(), "choices": []})
-            oe_count += 1
+            for (q_type, q_idx, _), result in zip(extra_tasks, results):
+                if isinstance(result, Exception):
+                    logger.error("extra_question_generation_failed", request_id=request_id, type=q_type, error=str(result))
+                else:
+                    questionnaire_str += f"\n{result}"
+                    parsed_questions.append({"type": q_type, "question": result.split("]", 1)[1].strip(), "choices": []})
         
         step_time = time.time() - step_start
         logger.info("extra_questions_completed", request_id=request_id, total_questions=len(parsed_questions), elapsed_seconds=step_time)
@@ -167,24 +184,15 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         # Publish CHOICES_GENERATED message
         await publish_progress(request_id, f"CHOICES_GENERATED: {len(questions_with_choices)} questions with choices")
         
-        # STEP 4: Video Questions (Optional)
+        # STEP 4: Video Questions (Optional) - Run in parallel with filtering
+        video_task = None
         if settings.INCLUDE_VIDEO_QUESTIONS:
-            step_start = time.time()
             await publish_progress(request_id, "Generating video questions...")
-            video_questions = await ai_service.generate_video_questions(
+            video_task = asyncio.create_task(ai_service.generate_video_questions(
                 company_name, business_overview, research_objectives
-            )
-            step_time = time.time() - step_start
-            logger.info("video_questions_generated", request_id=request_id, elapsed_seconds=step_time)
-            
-            for vq in video_questions:
-                questions_with_choices.append({
-                    "type": "Video",
-                    "question": vq.strip(),
-                    "choices": [""]
-                })
+            ))
         
-        # STEP 5: Filtering
+        # STEP 5: Filtering (can run while video questions generate)
         step_start = time.time()
         seen = set()
         final_questions = []
@@ -196,6 +204,20 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
                 final_questions.append(q)
         step_time = time.time() - step_start
         logger.info("filtering_complete", request_id=request_id, elapsed_seconds=step_time, final_question_count=len(final_questions))
+        
+        # Wait for video questions if they were being generated
+        if video_task:
+            try:
+                video_questions = await video_task
+                logger.info("video_questions_generated", request_id=request_id, count=len(video_questions))
+                for vq in video_questions:
+                    final_questions.append({
+                        "type": "Video",
+                        "question": vq.strip(),
+                        "choices": [""]
+                    })
+            except Exception as e:
+                logger.error("video_questions_generation_failed", request_id=request_id, error=str(e))
 
         # STEP 6: Document Building
         step_start = time.time()
@@ -301,7 +323,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         total_time = time.time() - start_time
         logger.info("survey_generation_completed", request_id=request_id, question_count=len(final_questions), total_seconds=total_time, doc_link=doc_link)
         
-        # Publish SUCCESS message
+        # Publish single SUCCESS message
         await publish_progress(request_id, "SUCCESS")
         
     except Exception as e:

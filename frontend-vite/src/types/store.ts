@@ -10,6 +10,7 @@ export interface SurveyState {
   businessOverview: string | null;
   researchObjectives: string | null;
   currentSurvey: Survey | null;
+  currentSurveyDocLink: string | null;
   isGenerating: boolean;
   error: string | null;
 }

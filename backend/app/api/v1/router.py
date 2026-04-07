@@ -9,7 +9,8 @@ from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (
     BusinessOverviewRequest, BusinessOverviewResponse,
-    ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse
+    ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse,
+    RegenerateSurveyDocRequest, RegenerateSurveyDocResponse
 )
 from app.services.ai_service import AIService
 from app.tasks.survey_tasks import update_survey_status
@@ -315,3 +316,164 @@ def get_survey_status(request: Request, request_id: str, db: Session = Depends(g
         "pages": record.pages or "",
         "doc_link": record.doc_link or "",
     }
+
+@router.post("/regenerate-document", response_model=RegenerateSurveyDocResponse)
+@limiter.limit("10/minute")
+async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocRequest, db: Session = Depends(get_db)):
+    """
+    Regenerate the survey DOCX document from the current survey state.
+    This is used when the user modifies the survey in the builder and wants to save changes.
+    
+    **Rate Limits:**
+    - 10 requests/minute per IP address
+    
+    **Request Body:**
+    - `request_id` (string, required): The original request ID
+    - `project_name` (string, required): Project name
+    - `company_name` (string, required): Company name
+    - `survey_title` (string, required): Survey title
+    - `survey_description` (string, required): Survey description
+    - `pages` (array, required): SurveyJS pages with questions
+    
+    **Response:**
+    - `success` (integer): 1 if successful
+    - `request_id` (string): The request ID
+    - `doc_link` (string): URL to the regenerated document
+    - `message` (string): Success message
+    
+    **Example:**
+    ```bash
+    curl -X POST -H "Authorization: Bearer <token>" \\
+      -H "Content-Type: application/json" \\
+      -d '{"request_id": "req-123", "project_name": "Survey", ...}' \\
+      "http://localhost:8000/api/v1/surveys/regenerate-document"
+    ```
+    """
+    logger.info("document_regeneration_requested", request_id=req.request_id, project_name=req.project_name)
+    
+    try:
+        from docx import Document
+        from pathlib import Path
+        import uuid
+        
+        # Load template
+        assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+        template_path = assets_dir / "template_new.docx"
+        
+        if not template_path.exists():
+            logger.error("template_not_found", template_path=str(template_path))
+            doc = Document()
+            doc.add_heading(req.survey_title, 0)
+        else:
+            logger.info("using_template", template_path=str(template_path))
+            doc = Document(str(template_path))
+        
+        # Replace template placeholders
+        for p in doc.paragraphs:
+            if '<<PROJECT NAME>>' in p.text:
+                p.text = p.text.replace('<<PROJECT NAME>>', req.project_name)
+            if '<<COMPANY>>' in p.text:
+                p.text = p.text.replace('<<COMPANY>>', req.company_name)
+        
+        # Add survey title and description
+        doc.add_heading(req.survey_title, 0)
+        if req.survey_description:
+            doc.add_paragraph(req.survey_description)
+        
+        # Process pages and questions
+        question_number = 1
+        for page in req.pages:
+            for element in page.get('elements', []):
+                # Add question
+                p = doc.add_paragraph(style='List Number')
+                
+                # Extract question title (strip HTML tags)
+                title = element.get('title', '')
+                if '<p>' in title:
+                    import re
+                    title = re.sub(r'<[^>]+>', '', title)
+                
+                run = p.add_run(f"{title}")
+                run.bold = True
+                
+                # Add choices based on question type
+                q_type = element.get('type', '')
+                
+                if q_type in ['radiogroup', 'checkbox']:
+                    # Multiple choice
+                    choices = element.get('choices', [])
+                    for choice in choices:
+                        choice_text = choice.get('text', choice.get('value', ''))
+                        if '<p>' in choice_text:
+                            import re
+                            choice_text = re.sub(r'<[^>]+>', '', choice_text)
+                        doc.add_paragraph(choice_text, style='List Bullet 2')
+                
+                elif q_type == 'matrix':
+                    # Matrix question
+                    rows = element.get('rows', [])
+                    columns = element.get('columns', [])
+                    
+                    doc.add_paragraph("Rows:", style='List Bullet 2')
+                    for row in rows:
+                        row_text = row.get('text', row.get('value', ''))
+                        if '<p>' in row_text:
+                            import re
+                            row_text = re.sub(r'<[^>]+>', '', row_text)
+                        doc.add_paragraph(row_text, style='List Bullet 3')
+                    
+                    doc.add_paragraph("Columns:", style='List Bullet 2')
+                    for col in columns:
+                        col_text = col.get('text', col.get('value', ''))
+                        if '<p>' in col_text:
+                            import re
+                            col_text = re.sub(r'<[^>]+>', '', col_text)
+                        doc.add_paragraph(col_text, style='List Bullet 3')
+                
+                elif q_type == 'comment':
+                    # Open-ended question
+                    doc.add_paragraph("[Open-ended text response]", style='List Bullet 2')
+                
+                doc.add_paragraph()  # Spacer
+                question_number += 1
+        
+        # Save document
+        output_dir = Path(__file__).resolve().parent.parent.parent.parent / "questionnaires"
+        output_dir.mkdir(exist_ok=True)
+        filename = f"{req.project_name.replace(' ', '_')}_questionnaire_{req.request_id}_updated.docx"
+        output_path = output_dir / filename
+        doc.save(str(output_path))
+        
+        logger.info("document_regenerated", request_id=req.request_id, filename=filename)
+        
+        # Upload to cloud storage
+        from app.services.storage_service import StorageService
+        storage_service = StorageService()
+        r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
+        
+        if r2_url:
+            doc_link = r2_url
+            logger.info("document_uploaded_to_r2", request_id=req.request_id, url=r2_url)
+        else:
+            logger.warning("r2_upload_failed", request_id=req.request_id)
+            doc_link = f"/api/v1/files/download/{filename}"
+        
+        # Update database record
+        record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
+        if record:
+            record.doc_link = doc_link
+            record.pages = req.pages
+            db.commit()
+            logger.info("database_updated", request_id=req.request_id)
+        
+        return RegenerateSurveyDocResponse(
+            success=1,
+            request_id=req.request_id,
+            doc_link=doc_link,
+            message=f"Document regenerated successfully with {question_number - 1} questions"
+        )
+        
+    except Exception as e:
+        logger.error("document_regeneration_error", request_id=req.request_id, error=str(e))
+        metrics.record_error(type(e).__name__)
+        raise HTTPException(status_code=500, detail=str(e))

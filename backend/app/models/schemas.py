@@ -49,3 +49,17 @@ class SurveyStatusResponse(BaseModel):
     use_case: str
     pages: Any = ""
     doc_link: str = ""
+
+class RegenerateSurveyDocRequest(BaseModel):
+    request_id: str
+    project_name: str
+    company_name: str
+    survey_title: str
+    survey_description: str
+    pages: List[Any]  # SurveyJS pages format
+
+class RegenerateSurveyDocResponse(BaseModel):
+    success: int
+    request_id: str
+    doc_link: str
+    message: str
