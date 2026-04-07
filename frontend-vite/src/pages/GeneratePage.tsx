@@ -6,10 +6,11 @@ import { useWebSocket } from '@/services/websocket/useWebSocket';
 import { ApiEndpoints } from '@/services/api/endpoints';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import type { Survey, Choice } from '@/types/survey';
 
 export const GeneratePage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentProject, businessOverview, isGenerating, setIsGenerating, setError } = useSurveyStore();
+  const { currentProject, businessOverview, isGenerating, setIsGenerating, setError, setCurrentSurvey } = useSurveyStore();
   const { addNotification } = useUIStore();
   const [progressLog, setProgressLog] = React.useState<string[]>([]);
   const [requestId, setRequestId] = React.useState<string>('');
@@ -47,10 +48,130 @@ export const GeneratePage: React.FC = () => {
           title: 'Generation Complete',
           message: 'Your survey has been successfully generated.',
         });
-        // Can navigate to builder automatically or show a button
+        // Fetch the generated survey data
+        fetchGeneratedSurvey();
       }
     }
   }, [lastMessage, setIsGenerating, addNotification]);
+
+  // Fallback: Poll for survey status if WebSocket is not connected
+  React.useEffect(() => {
+    if (!isGenerating || !requestId) return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await ApiEndpoints.getSurveyStatus(requestId);
+        
+        // Update progress log based on status
+        if (response.status === 'COMPLETED') {
+          clearInterval(pollInterval);
+          setIsGenerating(false);
+          setProgressLog(prev => [...prev, 'SUCCESS']);
+          addNotification({
+            type: 'success',
+            title: 'Generation Complete',
+            message: 'Your survey has been successfully generated.',
+          });
+          fetchGeneratedSurvey();
+        } else if (response.status === 'FAILED') {
+          clearInterval(pollInterval);
+          setIsGenerating(false);
+          setProgressLog(prev => [...prev, 'ERROR: Survey generation failed']);
+          addNotification({
+            type: 'error',
+            title: 'Generation Failed',
+            message: 'Survey generation encountered an error.',
+          });
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [isGenerating, requestId]);
+
+  const fetchGeneratedSurvey = async () => {
+    if (!requestId) return;
+    
+    try {
+      const response = await ApiEndpoints.getSurveyStatus(requestId);
+      if (response.status === 'COMPLETED' && response.pages) {
+        // Convert backend survey data to frontend Survey format
+        const survey: Survey = {
+          id: requestId,
+          title: currentProject?.projectName || 'Draft Survey',
+          description: businessOverview || 'Survey Description',
+          pages: Array.isArray(response.pages) ? response.pages.map((page: any) => ({
+            id: page.name || `page-${Math.random()}`,
+            name: page.name || 'page1',
+            title: page.title || 'Page',
+            questions: (page.elements || []).map((element: any) => ({
+              id: element.surveyQID || element.name || `q-${Math.random()}`,
+              type: mapQuestionType(element.type),
+              title: stripHtmlTags(element.title || ''),
+              description: element.description || '',
+              required: element.isRequired || false,
+              choices: mapChoices(element),
+            })),
+          })) : [],
+          settings: {
+            showProgressBar: true,
+            showQuestionNumbers: true,
+            allowBack: true,
+            completeText: 'Submit Survey',
+          },
+        };
+        
+        setCurrentSurvey(survey);
+        addNotification({
+          type: 'success',
+          title: 'Survey Loaded',
+          message: `${survey.pages.length} pages with ${survey.pages.reduce((acc, p) => acc + p.questions.length, 0)} questions loaded.`,
+        });
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch survey:', error);
+      addNotification({
+        type: 'error',
+        title: 'Load Failed',
+        message: 'Failed to load generated survey data.',
+      });
+    }
+  };
+
+  const mapQuestionType = (backendType: string): 'multiple-choice' | 'text' | 'matrix' | 'video' => {
+    switch (backendType) {
+      case 'radiogroup':
+      case 'checkbox':
+        return 'multiple-choice';
+      case 'comment':
+        return 'text';
+      case 'matrix':
+        return 'matrix';
+      case 'videofeedback':
+        return 'video';
+      default:
+        return 'text';
+    }
+  };
+
+  const stripHtmlTags = (html: string): string => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  };
+
+  const mapChoices = (element: any): Choice[] => {
+    if (element.choices && Array.isArray(element.choices)) {
+      return element.choices.map((choice: any, index: number) => ({
+        id: `choice-${index}`,
+        text: stripHtmlTags(choice.text || choice.value || choice),
+        value: choice.value || choice.text || choice,
+      }));
+    }
+    return [];
+  };
 
   const startGeneration = async () => {
     if (!currentProject || !businessOverview) return;
