@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     GPT3_FREQUENCY_PENALTY: float = 0.0
     GPT3_PRESENCE_PENALTY: float = 0.0
 
-    BusinessOverviewMaxToken: int = 200
+    BusinessOverviewMaxToken: int = 1000
     BusinessOverviewTemperature: float = 0.7
-    ResearchObjectivesMaxToken: int = 400
+    ResearchObjectivesMaxToken: int = 800
     ResearchObjectivesTemperature: float = 0.2
     QuestionnaireV2MaxToken: int = 1000
     MatrixOEMaxToken: int = 100

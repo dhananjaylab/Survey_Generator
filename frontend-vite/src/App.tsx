@@ -12,8 +12,7 @@ const LoginPage = React.lazy(() => import('./pages').then(module => ({ default: 
 const RegisterPage = React.lazy(() => import('./pages').then(module => ({ default: module.RegisterPage })));
 const ErrorPage = React.lazy(() => import('./pages').then(module => ({ default: module.ErrorPage })));
 
-const ProjectSetupPage = React.lazy(() => import('./pages').then(module => ({ default: module.ProjectSetupPage })));
-const ResearchPage = React.lazy(() => import('./pages').then(module => ({ default: module.ResearchPage })));
+const CreateSurveyPage = React.lazy(() => import('./pages').then(module => ({ default: module.CreateSurveyPage })));
 const BuilderPage = React.lazy(() => import('./pages').then(module => ({ default: module.BuilderPage })));
 const PreviewPage = React.lazy(() => import('./pages').then(module => ({ default: module.PreviewPage })));
 
@@ -35,18 +34,10 @@ function App() {
             
             {/* Protected Routes */}
             <Route
-              path="project-setup"
+              path="create"
               element={
                 <ProtectedRoute>
-                  <ProjectSetupPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="research"
-              element={
-                <ProtectedRoute>
-                  <ResearchPage />
+                  <CreateSurveyPage />
                 </ProtectedRoute>
               }
             />

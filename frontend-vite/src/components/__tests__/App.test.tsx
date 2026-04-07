@@ -19,8 +19,7 @@ vi.mock('@/pages', () => ({
   LoginPage: () => <div>Login Page</div>,
   RegisterPage: () => <div>Register Page</div>,
   ErrorPage: () => <div>Error Page</div>,
-  ProjectSetupPage: () => <div>Project Setup Page</div>,
-  ResearchPage: () => <div>Research Page</div>,
+  CreateSurveyPage: () => <div>Create Survey Page</div>,
   BuilderPage: () => <div>Builder Page</div>,
   PreviewPage: () => <div>Preview Page</div>,
 }))

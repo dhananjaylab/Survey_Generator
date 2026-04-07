@@ -17,7 +17,7 @@ export const HomePage: React.FC = () => {
       
       <div className="flex justify-center space-x-4">
         {isAuthenticated ? (
-          <Link to="/project-setup">
+          <Link to="/create">
             <Button size="lg">Create New Survey</Button>
           </Link>
         ) : (

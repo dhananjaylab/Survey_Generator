@@ -65,7 +65,7 @@ async def generate_use_case(request: Request, req: dict):
     logger.info("use_case_generation_requested", project_name=project_name, company_name=company_name, industry=industry, llm_model=llm_model)
     
     # Create a prompt to generate use case
-    prompt = f"""Generate a concise and descriptive use case for a survey project with the following details:
+    prompt = f"""Generate a detailed and descriptive use case for a survey project with the following details:
 
 Project Name: {project_name}
 Company Name: {company_name}
@@ -77,10 +77,11 @@ Industry: {industry}
     
     prompt += """
 
-Generate a 2-3 sentence use case description that explains:
+Generate a comprehensive use case description (3-5 paragraphs) that explains:
 1. What the survey aims to achieve
 2. Who the target audience is
 3. What insights or outcomes are expected
+4. How the results will be used
 
 Keep it professional and specific to the industry. Do not include any preamble or explanation, just the use case description."""
 
@@ -88,7 +89,7 @@ Keep it professional and specific to the industry. Do not include any preamble o
     try:
         await service.initialize()
         messages = [{"role": "user", "content": prompt}]
-        use_case = await service._call_llm(messages=messages, temperature=0.7, max_tokens=200)
+        use_case = await service._call_llm(messages=messages, temperature=0.7, max_tokens=800)
         logger.info("use_case_generated", project_name=project_name, company_name=company_name, llm_model=llm_model)
         return {"success": 1, "use_case": use_case.strip()}
     except Exception as e:

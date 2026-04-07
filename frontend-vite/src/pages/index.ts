@@ -7,7 +7,6 @@ export { LoginPage } from './LoginPage';
 export { RegisterPage } from './RegisterPage';
 export { HomePage } from './HomePage';
 export { ErrorPage } from './ErrorPage';
-export { ProjectSetupPage } from './ProjectSetupPage';
-export { ResearchPage } from './ResearchPage';
+export { CreateSurveyPage } from './CreateSurveyPage';
 export { BuilderPage } from './BuilderPage';
 export { PreviewPage } from './PreviewPage';
