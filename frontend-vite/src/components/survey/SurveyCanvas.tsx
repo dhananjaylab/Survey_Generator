@@ -177,27 +177,53 @@ export const SurveyCanvas: React.FC<SurveyCanvasProps> = ({ onSelectQuestion, se
                   )}
                   
                   {/* Type Preview */}
-                  <div className="mt-6 pointer-events-none opacity-50">
+                  <div className="mt-6 pointer-events-none origin-left">
                     {q.type === 'multiple-choice' && (
-                      <div className="space-y-2">
-                        {q.choices?.slice(0, 3).map(c => (
+                      <div className="space-y-3">
+                        {q.choices?.slice(0, 5).map(c => (
                           <div key={c.id} className="flex items-center space-x-3">
-                            <div className="w-4 h-4 rounded-full border border-gray-300" />
-                            <div className="h-2 w-32 bg-gray-100 rounded" />
+                            <div className="w-5 h-5 rounded-full border-2 border-gray-200 bg-white" />
+                            <span className="text-sm font-medium text-gray-400 capitalize whitespace-nowrap overflow-hidden text-ellipsis">
+                              {c.text || c.value}
+                            </span>
                           </div>
                         ))}
+                        {q.choices && q.choices.length > 5 && (
+                          <span className="text-[10px] text-gray-300 font-bold uppercase tracking-tighter">
+                            + {q.choices.length - 5} more options
+                          </span>
+                        )}
                       </div>
                     )}
                     {q.type === 'text' && (
-                      <div className="h-10 w-full bg-gray-50 border border-gray-100 rounded-lg" />
+                      <div className="h-12 w-full bg-gray-50 border border-gray-200 rounded-xl flex items-center px-4">
+                        <span className="text-xs text-gray-300 font-bold uppercase tracking-widest">User Text Response</span>
+                      </div>
                     )}
-                    {(q.type === 'rating' || q.type === 'nps') && (
-                      <div className="flex space-x-1">
-                        {[...Array(q.type === 'nps' ? 11 : 5)].map((_, i) => (
-                          <div key={i} className="w-8 h-8 rounded border border-gray-200 flex items-center justify-center text-[10px] font-bold">
-                            {i}
+                    {(q.type === 'rating' || q.type === 'nps' || q.type === 'opinion-scale') && (
+                      <div className="space-y-2">
+                        <div className="flex space-x-1 overflow-x-auto pb-1 no-scrollbar">
+                          {[...Array(q.type === 'nps' ? 11 : (q.maxScale || 5))].map((_, i) => (
+                            <div key={i} className="flex-shrink-0 w-10 h-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-xs font-black text-gray-300">
+                              {q.type === 'rating' ? i + 1 : i}
+                            </div>
+                          ))}
+                        </div>
+                        {(q.lowLabel || q.highLabel) && (
+                          <div className="flex justify-between w-full text-[10px] font-black text-gray-300 uppercase tracking-tighter">
+                            <span>{q.lowLabel || 'Low'}</span>
+                            <span>{q.highLabel || 'High'}</span>
                           </div>
-                        ))}
+                        )}
+                      </div>
+                    )}
+                    {q.type === 'video' && (
+                      <div className="aspect-video w-full max-w-sm bg-gray-900 rounded-2xl flex flex-col items-center justify-center text-gray-500 border border-gray-800 shadow-inner">
+                        <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3">
+                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest">Video Content Preview</span>
+                        {q.videoUrl && <span className="text-[10px] text-blue-400/50 mt-1 font-medium truncate px-4 w-full text-center">{q.videoUrl}</span>}
                       </div>
                     )}
                   </div>
