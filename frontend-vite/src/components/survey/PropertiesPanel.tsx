@@ -118,6 +118,69 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ selectedQuesti
             </div>
           </div>
         )}
+
+        {(question.type === 'rating' || question.type === 'opinion-scale' || question.type === 'nps') && (
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase mb-4">Scale Settings</h4>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Max Scale (e.g. 5 or 10)</label>
+                <input
+                  type="number"
+                  min="2"
+                  max="10"
+                  value={question.maxScale || (question.type === 'nps' ? 10 : 5)}
+                  onChange={(e) => updateQuestion({ maxScale: parseInt(e.target.value) || 5 })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border outline-none"
+                  disabled={question.type === 'nps'} // NPS is fixed 0-10
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Left Label (Low)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Not likely"
+                  value={question.lowLabel || ''}
+                  onChange={(e) => updateQuestion({ lowLabel: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Right Label (High)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Very likely"
+                  value={question.highLabel || ''}
+                  onChange={(e) => updateQuestion({ highLabel: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border outline-none"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {question.type === 'video' && (
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase mb-4">Video Settings</h4>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Video Embed URL (YouTube/Vimeo)</label>
+              <input
+                type="text"
+                placeholder="https://www.youtube.com/embed/..."
+                value={question.videoUrl || ''}
+                onChange={(e) => updateQuestion({ videoUrl: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border outline-none font-mono text-xs"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Make sure to use the <strong>embed</strong> URL format, not the standard watch link.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

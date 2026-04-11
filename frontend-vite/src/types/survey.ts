@@ -31,11 +31,16 @@ export interface BusinessOverviewResponse {
 
 export interface Question {
   id: string;
-  type: 'multiple-choice' | 'text' | 'matrix' | 'video';
+  type: 'multiple-choice' | 'text' | 'matrix' | 'video' | 'rating' | 'nps' | 'opinion-scale';
   title: string;
   description?: string;
   required: boolean;
   choices?: Choice[];
+  // New specific properties
+  maxScale?: number;
+  lowLabel?: string;
+  highLabel?: string;
+  videoUrl?: string;
 }
 
 export interface Choice {
@@ -64,6 +69,11 @@ export interface SurveySettings {
   showQuestionNumbers: boolean;
   allowBack: boolean;
   completeText: string;
+  triggers?: {
+    triggerType?: 'onLoad' | 'timeDelay' | 'exitIntent' | 'scrollDepth';
+    timeDelaySeconds?: number;
+    scrollDepthPercent?: number;
+  };
 }
 
 export interface ResearchObjectiveRequest {
