@@ -66,7 +66,7 @@ export const BuilderPage: React.FC = () => {
         type: 'error',
         title: 'Validation Error',
         message: 'Survey must have a title before saving.',
-        duration: 5000,
+        duration: 3000,
       });
       return;
     }
@@ -76,7 +76,7 @@ export const BuilderPage: React.FC = () => {
         type: 'error',
         title: 'Missing Project',
         message: 'Project information is missing. Please start from the beginning.',
-        duration: 5000,
+        duration: 3000,
       });
       return;
     }
@@ -119,7 +119,7 @@ export const BuilderPage: React.FC = () => {
           type: 'success',
           title: 'Server Upload Successful',
           message: 'Survey has been uploaded to cloud storage.',
-          duration: 4000,
+          duration: 2000,
         });
 
         // Step 2: Download the regenerated document
@@ -147,7 +147,7 @@ export const BuilderPage: React.FC = () => {
           type: 'success',
           title: 'Survey Downloaded',
           message: `Survey document "${filename}" has been downloaded successfully.`,
-          duration: 5000,
+          duration: 3000,
         });
       }
     } catch (error: any) {
@@ -162,7 +162,7 @@ export const BuilderPage: React.FC = () => {
         type: 'error',
         title: 'Save Failed',
         message: error.message || 'Failed to save and download survey. Please try again.',
-        duration: 7000,
+        duration: 4000,
       });
     } finally {
       setIsSaving(false);

@@ -14,7 +14,7 @@ export const NotificationContainer: React.FC = () => {
       // Skip if timer already exists for this notification
       if (timers.has(notification.id)) return;
 
-      const duration = notification.duration ?? 5000; // Default 5 seconds
+      const duration = notification.duration ?? 3000; // Default 3 seconds
       const timer = setTimeout(() => {
         removeNotification(notification.id);
       }, duration);

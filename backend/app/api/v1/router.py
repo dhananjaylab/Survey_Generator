@@ -10,7 +10,8 @@ from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (
     BusinessOverviewRequest, BusinessOverviewResponse,
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse,
-    RegenerateSurveyDocRequest, RegenerateSurveyDocResponse
+    RegenerateSurveyDocRequest, RegenerateSurveyDocResponse,
+    SurveyListItem, SurveyListResponse
 )
 from app.services.ai_service import AIService
 from app.tasks.survey_tasks import update_survey_status
@@ -185,7 +186,8 @@ def generate_questionnaire(request: Request, req: SurveyGenerationRequest, db: S
                     use_case=req.use_case,
                     business_overview=req.business_overview,
                     research_objectives=req.research_objectives,
-                    status="STARTING"
+                    status="STARTING",
+                    username=request.state.user_id if hasattr(request.state, 'user_id') else None
                 )
                 db.add(record)
                 db.commit()
@@ -479,3 +481,61 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
         logger.error("document_regeneration_error", request_id=req.request_id, error=str(e))
         metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/", response_model=SurveyListResponse)
+@limiter.limit("30/minute")
+def list_surveys(request: Request, db: Session = Depends(get_db)):
+    """
+    List all surveys belonging to the authenticated user.
+    Also includes surveys with no username (System Surveys).
+    """
+    from sqlalchemy import or_
+    user_id = request.state.user_id if hasattr(request.state, 'user_id') else None
+    
+    if not user_id:
+        # Fallback if verify_token didn't set request.state.user_id correctly
+        # though verify_token should have handled this
+        logger.warning("list_surveys_no_user_in_state")
+        raise HTTPException(status_code=401, detail="User not identified")
+
+    # Fetch surveys for user OR system surveys (username is NULL)
+    surveys = db.query(SurveyRequestRecord).filter(
+        or_(SurveyRequestRecord.username == user_id, SurveyRequestRecord.username.is_(None))
+    ).order_by(SurveyRequestRecord.created_at.desc()).all()
+    
+    return {
+        "success": 1,
+        "surveys": [
+            {
+                "request_id": s.request_id,
+                "project_name": s.project_name,
+                "company_name": s.company_name,
+                "industry": s.industry,
+                "status": s.status,
+                "created_at": s.created_at,
+                "doc_link": s.doc_link
+            } for s in surveys
+        ]
+    }
+
+@router.delete("/{request_id}")
+@limiter.limit("10/minute")
+def delete_survey(request: Request, request_id: str, db: Session = Depends(get_db)):
+    """Delete a survey owned by the user."""
+    user_id = request.state.user_id if hasattr(request.state, 'user_id') else None
+    
+    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request_id).first()
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    
+    # Check ownership (unless it's a system survey and we allow anyone to delete? 
+    # Usually only owner or admin can delete. For now, owner or system survey can be deleted by user)
+    if record.username and record.username != user_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this survey")
+    
+    db.delete(record)
+    db.commit()
+    
+    logger.info("survey_deleted", request_id=request_id, user_id=user_id)
+    return {"success": 1, "message": "Survey deleted successfully"}

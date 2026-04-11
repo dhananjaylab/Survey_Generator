@@ -13,11 +13,13 @@ import logging
 import redis.asyncio as aioredis
 import json
 import hashlib
+from duckduckgo_search import DDGS
 
 from app.core.config import settings
 from app.utils.prompts import PromptTemplates
 
 logger = logging.getLogger(__name__)
+
 
 class AIService:
     """Service for AI-powered content generation with caching and retry logic.
@@ -361,3 +363,79 @@ Questions:
         total_elapsed = time.time() - start_time
         logger.info(f"Optimized batch choice generation completed in {total_elapsed:.2f}s")
         return questions
+
+    async def generate_survey_json(self, company_name: str, business_overview: str, research_objectives: str, use_web_search: bool = False) -> List[Dict[str, Any]]:
+        """Single-pass JSON generation of the entire survey."""
+        context = ""
+        if use_web_search:
+            try:
+                results = DDGS().text(f"{company_name} industry survey questions trends", max_results=3)
+                context = "\nWeb Search Insights:\n" + "\n".join([f"- {r['body']}" for r in results])
+                logger.info(f"Web search retrieved {len(results)} snippets.")
+            except Exception as e:
+                logger.warning(f"Web search failed: {e}")
+
+        # Construct a strict JSON prompt
+        prompt = f"""You are an expert market researcher at {company_name}.
+Your job is to create an online survey questionnaire for a research project.
+
+BUSINESS OVERVIEW:
+{business_overview}
+
+RESEARCH OBJECTIVES:
+{research_objectives}
+{context}
+
+INSTRUCTIONS:
+1. Develop a high-quality market research questionnaire with a mix of 'Multiple Choice', 'Open-ended', and 'Matrix' questions.
+2. Provide exactly 15 to 20 well-thought-out questions.
+3. Determine the required answer choices based on the question type.
+   - For 'Multiple Choice': Provide an array of string choices.
+   - For 'Open-ended': Provide an empty array for choices.
+   - For 'Matrix': Provide exactly an array of two arrays: [[row1, row2, ...], [col1, col2, ...]].
+
+You MUST output your response as a valid JSON object matching this structure EXACTLY:
+{{
+  "questions": [
+    {{
+      "type": "Multiple Choice",
+      "question": "Which of the following do you use?",
+      "choices": ["Option 1", "Option 2", "Option 3"]
+    }},
+    {{
+      "type": "Matrix",
+      "question": "Rate the following attributes:",
+      "choices": [
+        ["Attribute A", "Attribute B"],
+        ["Poor", "Average", "Excellent"]
+      ]
+    }},
+    {{
+      "type": "Open-ended",
+      "question": "What is your main reason?",
+      "choices": []
+    }}
+  ]
+}}
+Do NOT wrap the JSON in Markdown formatting like ```json ... ```. Output raw JSON only."""
+
+        messages = [{"role": "system", "content": "You are a helpful API that returns strictly valid JSON."}, {"role": "user", "content": prompt}]
+        
+        result_text = await self._call_llm(messages=messages, temperature=0.7, max_tokens=3000)
+        
+        # Clean potential markdown wrapping
+        result_text = result_text.strip()
+        if result_text.startswith("```json"):
+            result_text = result_text[7:]
+        if result_text.startswith("```"):
+            result_text = result_text[3:]
+        if result_text.endswith("```"):
+            result_text = result_text[:-3]
+        result_text = result_text.strip()
+        
+        try:
+            data = json.loads(result_text)
+            return data.get("questions", [])
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI JSON response: {e}\nResponse: {result_text[:500]}...")
+            raise ValueError("The AI model returned invalid JSON structure.")

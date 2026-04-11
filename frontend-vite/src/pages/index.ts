@@ -10,3 +10,4 @@ export { ErrorPage } from './ErrorPage';
 export { CreateSurveyPage } from './CreateSurveyPage';
 export { BuilderPage } from './BuilderPage';
 export { PreviewPage } from './PreviewPage';
+export { DashboardPage } from './DashboardPage';

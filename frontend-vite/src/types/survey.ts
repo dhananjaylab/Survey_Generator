@@ -85,6 +85,7 @@ export interface SurveyGenerationRequest {
   industry: string;
   use_case: string;
   llm_model: string;
+  use_web_search?: boolean;
 }
 
 export interface SurveyStatusResponse {

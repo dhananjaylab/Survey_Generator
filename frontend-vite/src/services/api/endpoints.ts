@@ -70,6 +70,14 @@ export class ApiEndpoints {
     return httpService.get<SurveyStatusResponse>(`/api/v1/surveys/status/${requestId}`);
   }
 
+  static async getUserSurveys(): Promise<{ success: number; surveys: any[] }> {
+    return httpService.get('/api/v1/surveys/');
+  }
+
+  static async deleteSurvey(requestId: string): Promise<{ success: number; message: string }> {
+    return httpService.delete(`/api/v1/surveys/${requestId}`);
+  }
+
   static async regenerateSurveyDocument(request: RegenerateSurveyDocRequest): Promise<RegenerateSurveyDocResponse> {
     return httpService.post<RegenerateSurveyDocResponse>('/api/v1/surveys/regenerate-document', request);
   }

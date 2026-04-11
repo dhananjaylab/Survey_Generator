@@ -35,6 +35,7 @@ export const CreateSurveyPage: React.FC = () => {
     industry: currentProject?.industry || 'technology',
     useCase: currentProject?.useCase || '',
     llmProvider: currentProject?.llmProvider || 'gpt',
+    useWebSearch: false,
   });
 
   const [errors, setErrors] = React.useState<Record<string, string>>({});
@@ -367,7 +368,8 @@ export const CreateSurveyPage: React.FC = () => {
         use_case: formData.useCase,
         business_overview: localOverview,
         research_objectives: 'Generate standard research objectives.',
-        llm_model: formData.llmProvider || 'gpt'
+        llm_model: formData.llmProvider || 'gpt',
+        use_web_search: formData.useWebSearch
       });
       setProgressLog(prev => [...prev, 'Survey generation triggered successfully. Awaiting updates...']);
     } catch (err: any) {
@@ -531,6 +533,21 @@ export const CreateSurveyPage: React.FC = () => {
                   </Button>
                 </div>
               </FormField>
+              
+              <div className="flex items-center space-x-3 pt-2">
+                <input
+                  type="checkbox"
+                  id="useWebSearch"
+                  name="useWebSearch"
+                  checked={formData.useWebSearch}
+                  onChange={(e) => setFormData(prev => ({ ...prev, useWebSearch: e.target.checked }))}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  disabled={isGenerating}
+                />
+                <label htmlFor="useWebSearch" className="text-sm font-medium text-gray-700">
+                  Enable Web Search Intelligence (Fetches latest industry trends via DuckDuckGo)
+                </label>
+              </div>
             </div>
 
             {/* Business Overview Section - Collapsible */}
