@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ApiEndpoints } from '@/services/api/endpoints';
 import { useUIStore } from '@/stores/uiStore';
+import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';

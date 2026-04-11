@@ -144,6 +144,10 @@ class AIService:
                     "temperature": temperature or 0.7,
                     "max_output_tokens": max_tokens or 2000,
                 }
+                
+                # Turn off safety settings which were incorrectly truncating demographic questions
+                from google.genai import types
+                
                 if force_json:
                     config["response_mime_type"] = "application/json"
 
@@ -151,8 +155,17 @@ class AIService:
                 response = self.gemini_client.models.generate_content(
                     model=model_name,
                     contents=contents,
-                    config=config
+                    config=types.GenerateContentConfig(
+                        **config,
+                        safety_settings=[
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        ]
+                    )
                 )
+
                 result = response.text.strip()
                 
                 elapsed = time.time() - call_start
@@ -438,21 +451,45 @@ Do NOT wrap the JSON in Markdown formatting like ```json ... ```. Output raw JSO
 
         messages = [{"role": "system", "content": "You are a helpful API that returns strictly valid JSON."}, {"role": "user", "content": prompt}]
         
-        result_text = await self._call_llm(messages=messages, temperature=0.7, max_tokens=3000, force_json=True)
-        
-        # Clean potential markdown wrapping
-        result_text = result_text.strip()
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.startswith("```"):
-            result_text = result_text[3:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        result_text = result_text.strip()
-        
-        try:
-            data = json.loads(result_text)
-            return data.get("questions", [])
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse AI JSON response: {e}\nResponse: {result_text[:500]}...")
-            raise ValueError("The AI model returned invalid JSON structure.")
+        # Add internal retry loop for JSON generation
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                result_text = await self._call_llm(messages=messages, temperature=0.7 + (attempt * 0.1), max_tokens=6000, force_json=True)
+                
+                # Check if response was truncated abruptly
+                if not result_text.strip().endswith('}'):
+                    # Force append brackets to try rescuing minor truncation
+                    result_text += ']}'
+                
+                # Clean potential markdown wrapping
+                result_text = result_text.strip()
+                if result_text.startswith("```json"):
+                    result_text = result_text[7:]
+                if result_text.startswith("```"):
+                    result_text = result_text[3:]
+                if result_text.endswith("```"):
+                    result_text = result_text[:-3]
+                result_text = result_text.strip()
+                
+                # Use regex to find the outermost JSON block in case of garbage around it
+                import re
+                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+                if json_match:
+                    result_text = json_match.group(0)
+                
+                data = json.loads(result_text)
+                
+                # Validate schema loosely
+                if "questions" not in data or not isinstance(data["questions"], list):
+                    raise ValueError("JSON response missing 'questions' array")
+                    
+                return data["questions"]
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}\nResponse excerpt: {result_text[:500]}...")
+                if attempt == max_attempts - 1:
+                    logger.error("All internal retries for JSON generation failed.")
+                    raise ValueError("The AI model returned invalid JSON structure after multiple attempts.")
+                # Wait briefly before retrying
+                await asyncio.sleep(2)

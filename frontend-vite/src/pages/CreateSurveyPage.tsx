@@ -7,8 +7,9 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/FormField';
+import { Modal } from '@/components/ui/Modal';
+import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
 import { validateProjectSetup } from '@/utils/validation';
 import type { Survey, Choice } from '@/types/survey';
@@ -41,8 +42,8 @@ export const CreateSurveyPage: React.FC = () => {
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [isGeneratingUseCase, setIsGeneratingUseCase] = React.useState(false);
   const [localOverview, setLocalOverview] = React.useState(businessOverview || '');
-  const [progressLog, setProgressLog] = React.useState<string[]>([]);
-  const [requestId, setRequestId] = React.useState<string>('');
+  const [progressLog, setProgressLog] = React.useState<{time: string, message: string}[]>([]);
+  const [requestId, setRequestId] = React.useState<string | null>(null);
   const [showOverview, setShowOverview] = React.useState(false);
 
   const [lastMessage, setLastMessage] = React.useState<any>(null);
@@ -64,7 +65,7 @@ export const CreateSurveyPage: React.FC = () => {
 
   React.useEffect(() => {
     if (lastMessage) {
-      setProgressLog((prev) => [...prev, lastMessage.update]);
+      setProgressLog((prev) => [...prev, { time: new Date().toLocaleTimeString(), message: lastMessage.update }]);
       if (lastMessage.completed) {
         setIsGenerating(false);
         addNotification({
@@ -88,7 +89,7 @@ export const CreateSurveyPage: React.FC = () => {
         if (response.status === 'COMPLETED') {
           clearInterval(pollInterval);
           setIsGenerating(false);
-          setProgressLog(prev => [...prev, 'SUCCESS']);
+          setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'SUCCESS' }]);
           addNotification({
             type: 'success',
             title: 'Generation Complete',
@@ -98,7 +99,7 @@ export const CreateSurveyPage: React.FC = () => {
         } else if (response.status === 'FAILED') {
           clearInterval(pollInterval);
           setIsGenerating(false);
-          setProgressLog(prev => [...prev, 'ERROR: Survey generation failed']);
+          setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'ERROR: Survey generation failed' }]);
           addNotification({
             type: 'error',
             title: 'Generation Failed',
@@ -170,6 +171,10 @@ export const CreateSurveyPage: React.FC = () => {
           title: 'Survey Loaded',
           message: `${totalQuestions} questions loaded successfully.`,
         });
+        
+        // Auto-navigate to builder on completion
+        navigate('/builder');
+
       }
     } catch (error: any) {
       console.error('Failed to fetch survey:', error);
@@ -355,7 +360,7 @@ export const CreateSurveyPage: React.FC = () => {
     setCurrentProject(formData);
     setBusinessOverview(localOverview);
     setIsGenerating(true);
-    setProgressLog(['Starting API request...']);
+    setProgressLog([{ time: new Date().toLocaleTimeString(), message: 'Starting API request...' }]);
     const newReqId = `req-${Date.now()}`;
     setRequestId(newReqId);
 
@@ -371,7 +376,7 @@ export const CreateSurveyPage: React.FC = () => {
         llm_model: formData.llmProvider || 'gpt',
         use_web_search: formData.useWebSearch
       });
-      setProgressLog(prev => [...prev, 'Survey generation triggered successfully. Awaiting updates...']);
+      setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'Survey generation triggered successfully. Awaiting updates...' }]);
     } catch (err: any) {
       setIsGenerating(false);
       setError(err.detail || 'Generation failed');
@@ -383,52 +388,12 @@ export const CreateSurveyPage: React.FC = () => {
     }
   };
 
-  if (isGenerating || progressLog.length > 0) {
-    return (
-      <div className="max-w-4xl mx-auto py-8">
-        <div className="bg-white shadow sm:rounded-lg">
-          <div className="px-4 py-5 sm:p-6 bg-gray-50 border-b border-gray-200">
-            <h3 className="text-2xl font-bold text-gray-900">Generating Survey</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Please wait while we generate your survey...
-            </p>
-          </div>
-
-          <div className="px-4 py-5 sm:p-6">
-            <div className="bg-gray-900 rounded-lg p-6 text-left max-h-96 overflow-y-auto font-mono text-sm shadow-inner relative">
-              {isGenerating && (
-                <div className="absolute top-4 right-4 flex items-center space-x-2 text-green-400">
-                  <Spinner size="sm" className="text-green-400" />
-                  <span>Processing</span>
-                </div>
-              )}
-              
-              {!isConnected && isGenerating && (
-                <p className="text-yellow-400 opacity-80 mb-2">WebSocket not connected. Using polling fallback...</p>
-              )}
-
-              <div className="space-y-2">
-                {progressLog.map((log, index) => (
-                  <div key={index} className="text-green-400">
-                    <span className="text-gray-500 mr-2">[{new Date().toLocaleTimeString()}]</span>
-                    {log}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {!isGenerating && progressLog.length > 0 && (
-              <div className="mt-6 flex justify-end">
-                <Button size="lg" onClick={() => navigate('/builder')}>
-                  Continue to Survey Editor
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [progressLog]);
 
   return (
     <div className="max-w-4xl mx-auto py-8">
@@ -604,6 +569,55 @@ export const CreateSurveyPage: React.FC = () => {
           </div>
         </form>
       </div>
+
+      <Modal 
+        isOpen={isGenerating || progressLog.length > 0} 
+        onClose={() => {}} 
+        title="Generating Survey"
+      >
+        <div className="flex flex-col space-y-4">
+          <p className="text-sm text-gray-600">
+            Please wait while we generate your survey using AI. This may take a few seconds.
+          </p>
+
+          <div className="bg-gray-900 rounded-lg p-4 text-left h-48 overflow-y-auto font-mono text-sm shadow-inner relative">
+            {!isConnected && isGenerating && (
+              <p className="text-yellow-400 opacity-80 mb-2 text-xs">WebSocket disconnected. Falling back to polling.</p>
+            )}
+
+            <div className="space-y-1">
+              {progressLog.map((log, index) => {
+                return (
+                  <div key={index} className="text-green-400 break-words flex items-start">
+                    <span className="text-gray-500 mr-2 flex-shrink-0">[{log.time}]</span>
+                    <span>{log.message}</span>
+                  </div>
+                );
+              })}
+              <div ref={logsEndRef} />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center space-x-2">
+              {isGenerating ? (
+                <>
+                  <Spinner size="sm" className="text-blue-500" />
+                  <span className="text-sm text-gray-500">Processing...</span>
+                </>
+              ) : (
+                <span className="text-sm text-green-600 font-medium">Generation complete!</span>
+              )}
+            </div>
+            
+            {!isGenerating && progressLog.length > 0 && (
+              <Button size="sm" onClick={() => navigate('/builder')}>
+                Continue to Editor
+              </Button>
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
