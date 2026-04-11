@@ -2,9 +2,10 @@ import * as React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ApiEndpoints } from '@/services/api/endpoints';
 import { useUIStore } from '@/stores/uiStore';
-import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Select } from '@/components/ui/Select';
+import { Modal } from '@/components/ui/Modal';
+
 
 interface SurveyRecord {
   request_id: string;
@@ -22,6 +23,7 @@ export const DashboardPage: React.FC = () => {
   const [surveys, setSurveys] = React.useState<SurveyRecord[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [surveyToDelete, setSurveyToDelete] = React.useState<string | null>(null);
   const [sortBy, setSortBy] = React.useState('newest');
 
   const fetchSurveys = React.useCallback(async () => {
@@ -65,12 +67,16 @@ export const DashboardPage: React.FC = () => {
     });
   }, [surveys, sortBy]);
 
-  const handleDelete = async (requestId: string) => {
-    if (!window.confirm('Are you sure you want to delete this survey? This action cannot be undone.')) {
-      return;
-    }
+  const handleDeleteClick = (requestId: string) => {
+    setSurveyToDelete(requestId);
+  };
 
+  const confirmDelete = async () => {
+    if (!surveyToDelete) return;
+    
+    const requestId = surveyToDelete;
     setDeletingId(requestId);
+    setSurveyToDelete(null);
     try {
       const response = await ApiEndpoints.deleteSurvey(requestId);
       if (response.success) {
@@ -188,7 +194,7 @@ export const DashboardPage: React.FC = () => {
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={() => handleDelete(survey.request_id)}
+                  onClick={() => handleDeleteClick(survey.request_id)}
                   disabled={deletingId === survey.request_id}
                   className="text-error-600 hover:text-error-700 hover:bg-error-50 rounded-lg p-2"
                   title="Delete Survey"
@@ -204,6 +210,36 @@ export const DashboardPage: React.FC = () => {
           ))}
         </div>
       )}
+
+
+      {/* Modern Delete Confirmation Modal */}
+      <Modal 
+        isOpen={!!surveyToDelete} 
+        onClose={() => setSurveyToDelete(null)}
+        title="Delete Survey"
+      >
+        <div className="mt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete this survey? This action cannot be undone and will permanently remove the survey and its associated data.
+          </p>
+        </div>
+
+        <div className="mt-6 flex justify-end space-x-3">
+          <Button
+            variant="outline"
+            onClick={() => setSurveyToDelete(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={confirmDelete}
+            className="bg-error-600 hover:bg-error-700 text-white shadow-sm"
+          >
+            Delete
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 };

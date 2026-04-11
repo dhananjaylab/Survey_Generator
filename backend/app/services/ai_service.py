@@ -101,21 +101,23 @@ class AIService:
         retry=retry_if_exception_type((Exception,)),
         reraise=True
     )
-    async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None) -> str:
+    async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None, force_json: bool = False) -> str:
         """Call the configured LLM (OpenAI GPT or Google Gemini)."""
         call_start = time.time()
         try:
             if self.llm_model == "gpt":
                 model_name = settings.CHATGPT_MODEL
                 logger.info(f"LLM_CALL_START: Using {model_name} (OpenAI GPT)")
-                
-                # OpenAI API call
-                response = await self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=temperature or 0.7,
-                    max_tokens=max_tokens or 2000,
-                )
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": temperature or 0.7,
+                    "max_tokens": max_tokens or 2000,
+                }
+                if force_json:
+                    kwargs["response_format"] = {"type": "json_object"}
+                    
+                response = await self.client.chat.completions.create(**kwargs)
                 result = response.choices[0].message.content.strip()
                 
                 elapsed = time.time() - call_start
@@ -138,15 +140,18 @@ class AIService:
                         "role": gemini_role,
                         "parts": [{"text": content}]
                     })
-                
+                config = {
+                    "temperature": temperature or 0.7,
+                    "max_output_tokens": max_tokens or 2000,
+                }
+                if force_json:
+                    config["response_mime_type"] = "application/json"
+
                 # Call Gemini API using google-genai SDK
                 response = self.gemini_client.models.generate_content(
                     model=model_name,
                     contents=contents,
-                    config={
-                        "temperature": temperature or 0.7,
-                        "max_output_tokens": max_tokens or 2000,
-                    }
+                    config=config
                 )
                 result = response.text.strip()
                 
@@ -166,9 +171,21 @@ class AIService:
         
         messages = self.prompt_templates.get_business_overview_prompt(company_name)
         result = await self._call_llm(messages=messages, temperature=settings.BusinessOverviewTemperature, max_tokens=settings.BusinessOverviewMaxToken)
-        overview = f"{company_name} is {result}"
         
+        # Strip exact match prefix if the LLM output it natively
+        lower_result = result.lower().strip()
+        lower_company = company_name.lower().strip()
+        
+        if lower_result.startswith(f"{lower_company} is"):
+            overview = result
+        elif lower_result.startswith(lower_company):
+            # Sometimes it might just output "Amazon, a leading..."
+            overview = result
+        else:
+            overview = f"{company_name} is {result}"
+            
         await self._set_cached(cache_key, overview)
+
         return overview
     
     async def generate_research_objectives(self, company_name, business_overview, industry, use_case, use_cache=True):
@@ -421,7 +438,7 @@ Do NOT wrap the JSON in Markdown formatting like ```json ... ```. Output raw JSO
 
         messages = [{"role": "system", "content": "You are a helpful API that returns strictly valid JSON."}, {"role": "user", "content": prompt}]
         
-        result_text = await self._call_llm(messages=messages, temperature=0.7, max_tokens=3000)
+        result_text = await self._call_llm(messages=messages, temperature=0.7, max_tokens=3000, force_json=True)
         
         # Clean potential markdown wrapping
         result_text = result_text.strip()
