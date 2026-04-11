@@ -49,6 +49,7 @@ class SurveyStatusResponse(BaseModel):
     industry: str
     use_case: str
     pages: Any = ""
+    settings: Optional[Any] = None
     doc_link: str = ""
 
 class RegenerateSurveyDocRequest(BaseModel):
@@ -58,6 +59,10 @@ class RegenerateSurveyDocRequest(BaseModel):
     survey_title: str
     survey_description: str
     pages: List[Any]  # SurveyJS pages format
+
+class SurveySettingsUpdateRequest(BaseModel):
+    request_id: str
+    settings: Any # Survey triggers and configurations
 
 class RegenerateSurveyDocResponse(BaseModel):
     success: int

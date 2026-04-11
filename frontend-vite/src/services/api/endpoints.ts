@@ -82,6 +82,10 @@ export class ApiEndpoints {
     return httpService.post<RegenerateSurveyDocResponse>('/api/v1/surveys/regenerate-document', request);
   }
 
+  static async updateSurveySettings(requestId: string, settings: any): Promise<{ success: number; settings: any }> {
+    return httpService.post('/api/v1/surveys/settings', { request_id: requestId, settings });
+  }
+
   // File endpoints
   static async downloadSurveyDocument(filename: string): Promise<void> {
     return httpService.downloadFile(`/api/v1/files/download/${filename}`, filename);

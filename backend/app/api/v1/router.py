@@ -11,7 +11,7 @@ from app.models.schemas import (
     BusinessOverviewRequest, BusinessOverviewResponse,
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse,
     RegenerateSurveyDocRequest, RegenerateSurveyDocResponse,
-    SurveyListItem, SurveyListResponse
+    SurveyListItem, SurveyListResponse, SurveySettingsUpdateRequest
 )
 from app.services.ai_service import AIService
 from app.tasks.survey_tasks import update_survey_status
@@ -318,6 +318,7 @@ def get_survey_status(request: Request, request_id: str, db: Session = Depends(g
         "business_overview": record.business_overview or "",
         "research_objectives": record.research_objectives or "",
         "pages": record.pages or "",
+        "settings": record.settings,
         "doc_link": record.doc_link or "",
     }
 
@@ -480,6 +481,26 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
     except Exception as e:
         logger.error("document_regeneration_error", request_id=req.request_id, error=str(e))
         metrics.record_error(type(e).__name__)
+        raise HTTPException(status_code=500, detail=str(e))
+        
+@router.post("/settings")
+@limiter.limit("20/minute")
+async def update_survey_settings(request: Request, req: SurveySettingsUpdateRequest, db: Session = Depends(get_db)):
+    """Update behavioral triggers and targeting settings immediately."""
+    logger.info("settings_update_requested", request_id=req.request_id)
+    
+    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Survey not found")
+        
+    try:
+        record.settings = req.settings
+        db.commit()
+        logger.info("settings_updated_successfully", request_id=req.request_id)
+        return {"success": 1, "settings": record.settings}
+    except Exception as e:
+        db.rollback()
+        logger.error("settings_update_error", request_id=req.request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/", response_model=SurveyListResponse)

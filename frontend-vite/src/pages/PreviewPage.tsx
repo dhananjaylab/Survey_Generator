@@ -8,6 +8,8 @@ export const PreviewPage: React.FC = () => {
   const { currentSurvey } = useSurveyStore();
   const navigate = useNavigate();
   const [viewMode, setViewMode] = React.useState<'desktop' | 'mobile'>('desktop');
+  const [currentQuestionIndex, setCurrentQuestionIndex] = React.useState<number>(-1); // -1 is the "Welcome" screen
+  const [answers, setAnswers] = React.useState<Record<string, any>>({});
   
   if (!currentSurvey) {
     return (
@@ -18,11 +20,24 @@ export const PreviewPage: React.FC = () => {
     );
   }
 
-  // MVP single page preview
   const questions = currentSurvey.pages[0]?.questions || [];
 
+  const handleNext = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    } else {
+      handleSimulateResponse();
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentQuestionIndex > -1) {
+      setCurrentQuestionIndex(currentQuestionIndex - 1);
+    }
+  };
+
   const handleSimulateResponse = () => {
-    alert("Survey submission simulated successfully!");
+    alert("Survey submission simulated successfully! Answers: " + JSON.stringify(answers));
   };
 
   return (
@@ -59,76 +74,162 @@ export const PreviewPage: React.FC = () => {
       </div>
 
       {/* Canvas Area */}
-      <div className="flex-1 bg-gray-100 overflow-y-auto p-4 md:p-8 flex justify-center">
+      <div className="flex-1 bg-gray-50 overflow-y-auto p-4 md:p-12 flex justify-center items-center">
         <div 
           className={cn(
-            "bg-white shadow-md transition-all duration-300 relative",
-            viewMode === 'desktop' ? "w-full max-w-4xl rounded-lg min-h-[70vh]" : "w-[375px] min-h-[812px] rounded-3xl border-[8px] border-black my-8"
+            "bg-white shadow-2xl transition-all duration-500 relative flex flex-col items-center justify-center",
+            viewMode === 'desktop' ? "w-full max-w-5xl rounded-[40px] min-h-[70vh] p-16" : "w-[375px] min-h-[812px] rounded-[60px] border-[12px] border-black my-8 p-10"
           )}
         >
           {viewMode === 'mobile' && (
-            <div className="w-40 h-6 bg-black absolute top-0 left-1/2 -translate-x-1/2 rounded-b-xl z-20"></div>
+            <div className="w-32 h-7 bg-black absolute top-0 left-1/2 -translate-x-1/2 rounded-b-[2rem] z-20"></div>
           )}
           
-          <div className={cn("h-full", viewMode === 'mobile' ? "pt-10 px-5 pb-8 overflow-y-auto" : "p-8 md:p-12")}>
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">{currentSurvey.title}</h1>
-              {currentSurvey.description && (
-                <p className="text-lg text-gray-600">{currentSurvey.description}</p>
-              )}
-            </div>
-
-            <div className="space-y-8">
-              {questions.length === 0 ? (
-                <p className="text-center text-gray-500 my-12">This survey has no questions.</p>
-              ) : (
-                questions.map((question, index) => (
-                  <div key={question.id} className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-                    <h3 className="text-lg font-medium text-gray-900 mb-1">
-                      {index + 1}. {question.title}
-                      {question.required && <span className="text-red-500 ml-1">*</span>}
+          <div className="w-full max-w-2xl h-full flex flex-col justify-center animate-in fade-in zoom-in-95 duration-500">
+            {currentQuestionIndex === -1 ? (
+              <div className="text-center space-y-8">
+                <div className="space-y-4">
+                  <h1 className="text-5xl font-black text-gray-900 leading-tight">{currentSurvey.title}</h1>
+                  {currentSurvey.description && (
+                    <p className="text-xl text-gray-500 font-medium leading-relaxed italic">{currentSurvey.description}</p>
+                  )}
+                </div>
+                <div className="pt-8">
+                  <Button size="lg" onClick={() => setCurrentQuestionIndex(0)} className="px-12 py-8 text-xl font-bold rounded-2xl shadow-xl hover:scale-105 transition-transform">
+                    Get Started
+                  </Button>
+                  <p className="text-xs text-gray-400 mt-4 font-bold uppercase tracking-widest">press Enter ↵</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-10">
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-4">
+                    <span className="text-blue-600 font-black text-2xl">{currentQuestionIndex + 1} →</span>
+                    <h3 className="text-3xl font-black text-gray-900 leading-tight">
+                      {questions[currentQuestionIndex].title}
+                      {questions[currentQuestionIndex].required && <span className="text-red-500 ml-2">*</span>}
                     </h3>
-                    {question.description && (
-                      <p className="text-sm text-gray-500 mb-4">{question.description}</p>
-                    )}
-                    
-                    <div className="mt-4">
-                      {question.type === 'text' && (
-                        <input 
-                          type="text" 
-                          className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" 
-                          placeholder="Your answer"
+                  </div>
+                  {questions[currentQuestionIndex].description && (
+                    <p className="text-lg text-gray-400 font-medium italic pl-12">
+                      {questions[currentQuestionIndex].description}
+                    </p>
+                  )}
+                </div>
+
+                <div className="pl-12 pt-4">
+                  {questions[currentQuestionIndex].type === 'video' && (
+                    <div className="aspect-video w-full rounded-3xl overflow-hidden shadow-2xl bg-black border border-gray-100">
+                      {questions[currentQuestionIndex].videoUrl ? (
+                        <iframe 
+                          src={questions[currentQuestionIndex].videoUrl} 
+                          className="w-full h-full" 
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                          allowFullScreen
                         />
-                      )}
-                      
-                      {question.type === 'multiple-choice' && (
-                        <div className="space-y-2">
-                          {question.choices?.map(choice => (
-                            <label key={choice.id} className="flex items-start p-3 border border-gray-200 rounded-md hover:bg-white cursor-pointer transition-colors bg-white">
-                              <input 
-                                type="radio" 
-                                name={`q-${question.id}`} 
-                                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
-                              />
-                              <span className="ml-3 block text-gray-700">{choice.text}</span>
-                            </label>
-                          ))}
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-500">
+                          Video URL not set in properties
                         </div>
                       )}
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
+                  )}
 
-            {questions.length > 0 && (
-              <div className="mt-12 flex justify-center border-t border-gray-200 pt-8">
-                <Button size="lg" className="w-full md:w-auto md:min-w-[200px]" onClick={handleSimulateResponse}>
-                  Submit Response
-                </Button>
+                  {questions[currentQuestionIndex].type === 'multiple-choice' && (
+                    <div className="space-y-3">
+                      {questions[currentQuestionIndex].choices?.map((choice, idx) => (
+                        <button 
+                          key={choice.id}
+                          onClick={() => {
+                            setAnswers({ ...answers, [questions[currentQuestionIndex].id]: choice.value });
+                            handleNext();
+                          }}
+                          className="w-full flex items-center p-4 border-2 border-gray-100 rounded-2xl hover:border-gray-900 hover:bg-gray-50 transition-all font-bold text-gray-800 text-left group"
+                        >
+                          <span className="w-8 h-8 flex items-center justify-center border-2 border-gray-200 rounded-lg mr-4 group-hover:bg-gray-900 group-hover:text-white transition-colors text-xs">
+                            {String.fromCharCode(65 + idx)}
+                          </span>
+                          {choice.text}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {questions[currentQuestionIndex].type === 'text' && (
+                    <div className="space-y-4">
+                      <textarea 
+                        className="w-full p-6 text-2xl font-bold bg-transparent border-b-2 border-gray-100 outline-none focus:border-gray-900 transition-colors placeholder-gray-200 min-h-[120px]" 
+                        placeholder="Type your answer here..."
+                        autoFocus
+                        value={answers[questions[currentQuestionIndex].id] || ''}
+                        onChange={(e) => setAnswers({ ...answers, [questions[currentQuestionIndex].id]: e.target.value })}
+                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleNext()}
+                      />
+                    </div>
+                  )}
+
+                  {(questions[currentQuestionIndex].type === 'rating' || questions[currentQuestionIndex].type === 'opinion-scale' || questions[currentQuestionIndex].type === 'nps') && (
+                    <div className="space-y-6">
+                      <div className="flex flex-wrap gap-2">
+                        {[...Array((questions[currentQuestionIndex].maxScale || (questions[currentQuestionIndex].type === 'nps' ? 10 : 5)) + 1)].map((_, i) => {
+                          const val = questions[currentQuestionIndex].type === 'rating' ? i + 1 : i;
+                          if (questions[currentQuestionIndex].type === 'rating' && val > (questions[currentQuestionIndex].maxScale || 5)) return null;
+                          
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setAnswers({ ...answers, [questions[currentQuestionIndex].id]: val });
+                                handleNext();
+                              }}
+                              className="w-14 h-14 flex items-center justify-center border-2 border-gray-100 rounded-2xl font-black text-xl hover:border-gray-900 hover:bg-gray-50 transition-all"
+                            >
+                              {val}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {(questions[currentQuestionIndex].lowLabel || questions[currentQuestionIndex].highLabel) && (
+                        <div className="flex justify-between text-xs font-black uppercase tracking-widest text-gray-400 max-w-xl">
+                          <span>{questions[currentQuestionIndex].lowLabel || 'Poor'}</span>
+                          <span>{questions[currentQuestionIndex].highLabel || 'Excellent'}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-6 pl-12 pt-8">
+                  <Button size="lg" onClick={handleNext} className="px-10 py-6 text-lg font-bold rounded-xl shadow-lg">
+                    {currentQuestionIndex === questions.length - 1 ? 'Submit' : 'OK ✓'}
+                  </Button>
+                  <div className="flex space-x-2">
+                    <button onClick={handlePrev} className="p-3 text-gray-400 hover:text-gray-900 transition-colors">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                      </svg>
+                    </button>
+                    <button onClick={handleNext} className="p-3 text-gray-400 hover:text-gray-900 transition-colors">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
+
+          {/* Progress Bar */}
+          {currentQuestionIndex > -1 && (
+            <div className="absolute top-0 left-0 w-full h-2 bg-gray-50">
+              <div 
+                className="h-full bg-blue-600 transition-all duration-500" 
+                style={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

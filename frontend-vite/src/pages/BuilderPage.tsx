@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { useSurveyStore } from '@/stores/surveyStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useNavigate } from 'react-router-dom';
+import { TriggersPanel } from '@/components/survey/TriggersPanel';
 import { ApiEndpoints } from '@/services/api/endpoints';
 
 export const BuilderPage: React.FC = () => {
@@ -14,6 +15,7 @@ export const BuilderPage: React.FC = () => {
   const { currentSurvey, currentSurveyDocLink, currentProject, setCurrentSurveyDocLink } = useSurveyStore();
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
 
   const convertSurveyToBackendFormat = () => {
     // Convert frontend Survey format to backend SurveyJS format
@@ -182,9 +184,18 @@ export const BuilderPage: React.FC = () => {
           </span>
         </div>
         <div className="flex space-x-3">
-          <Button variant="outline" size="sm" onClick={() => navigate('/preview')}>Preview</Button>
-          <Button size="sm" onClick={handleSave} disabled={isSaving}>
-            {isSaving ? 'Downloading...' : 'Save Survey'}
+          <Button variant="outline" size="sm" onClick={() => navigate('/preview')} className="flex items-center space-x-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            <span>Preview</span>
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            <span>{isSaving ? 'Exporting...' : 'Export DOCX'}</span>
           </Button>
         </div>
       </div>
@@ -195,12 +206,42 @@ export const BuilderPage: React.FC = () => {
         
         <SurveyCanvas 
           selectedQuestionId={selectedQuestionId} 
-          onSelectQuestion={(q) => setSelectedQuestionId(q.id)} 
+          onSelectQuestion={(q) => {
+            setSelectedQuestionId(q.id);
+            setActiveTab('properties'); // Auto switch to properties on selection
+          }} 
         />
         
-        <PropertiesPanel 
-          selectedQuestionId={selectedQuestionId} 
-        />
+        <div className="w-96 bg-white border-l border-gray-200 flex flex-col h-full">
+          <div className="p-4 border-b border-gray-100 flex justify-center">
+            <div className="bg-gray-100 p-1 rounded-lg flex w-full max-w-[280px]">
+              <button
+                className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${
+                  activeTab === 'properties' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setActiveTab('properties')}
+              >
+                Properties
+              </button>
+              <button
+                className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${
+                  activeTab === 'triggers' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setActiveTab('triggers')}
+              >
+                Triggers
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'properties' ? (
+              <PropertiesPanel selectedQuestionId={selectedQuestionId} />
+            ) : (
+              <TriggersPanel />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

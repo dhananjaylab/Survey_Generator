@@ -70,9 +70,10 @@ export interface SurveySettings {
   allowBack: boolean;
   completeText: string;
   triggers?: {
-    triggerType?: 'onLoad' | 'timeDelay' | 'exitIntent' | 'scrollDepth';
-    timeDelaySeconds?: number;
-    scrollDepthPercent?: number;
+    timeOnPage: { enabled: boolean; seconds: number };
+    scrollDepth: { enabled: boolean; percent: number };
+    exitIntent: { enabled: boolean };
+    targeting: { paths: string[] };
   };
 }
 
