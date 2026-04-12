@@ -208,12 +208,13 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         storage_service = StorageService()
         r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
         
+        # Always use the local download proxy for the doc_link to avoid CORS issues
+        doc_link = f"/api/v1/files/download/{filename}"
+        
         if r2_url:
-            doc_link = r2_url
             logger.info("file_uploaded_to_r2", request_id=request_id, url=r2_url)
         else:
             logger.warning("r2_upload_failed_using_local_fallback", request_id=request_id)
-            doc_link = f"/api/v1/files/download/{filename}"
         
         step_time = time.time() - step_start
         logger.info("file_uploaded", request_id=request_id, elapsed_seconds=step_time)

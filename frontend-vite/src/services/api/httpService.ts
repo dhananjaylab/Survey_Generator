@@ -13,7 +13,7 @@ class HttpService {
     try {
       this.client = axios.create({
         baseURL,
-        timeout: 30000,
+        timeout: 60000,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -101,8 +101,23 @@ class HttpService {
         }
 
         // Transform API errors
+        let detail = 'An unexpected error occurred';
+        
+        // Handle Blob errors (happens during file downloads)
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const data = JSON.parse(text);
+            detail = data.detail || detail;
+          } catch (e) {
+            console.error('Failed to parse error blob:', e);
+          }
+        } else {
+          detail = error.response.data?.detail || detail;
+        }
+
         const apiError: ApiError = {
-          detail: error.response.data?.detail || 'An unexpected error occurred',
+          detail,
           errorCode: error.response.data?.errorCode,
           timestamp: error.response.data?.timestamp || new Date().toISOString(),
         };

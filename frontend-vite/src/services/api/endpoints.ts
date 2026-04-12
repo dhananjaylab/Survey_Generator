@@ -87,6 +87,11 @@ export class ApiEndpoints {
   }
 
   // File endpoints
+  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
+    console.log('📥 [API] Downloading file from URL:', url);
+    return httpService.downloadFile(url, filename);
+  }
+
   static async downloadSurveyDocument(filename: string): Promise<void> {
     return httpService.downloadFile(`/api/v1/files/download/${filename}`, filename);
   }

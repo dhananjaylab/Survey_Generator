@@ -43,12 +43,18 @@ export const BuilderPage: React.FC = () => {
           element.type = 'comment';
         } else if (question.type === 'matrix') {
           element.type = 'matrix';
-          // Matrix questions need rows and columns
-          // For now, use placeholder data
-          element.rows = [{ value: 'row1', text: '<p>Row 1</p>' }];
-          element.columns = [{ value: 'col1', text: '<p>Column 1</p>' }];
+          element.rows = (question as any).rows || [{ value: 'row1', text: '<p>Row 1</p>' }];
+          element.columns = (question as any).columns || [{ value: 'col1', text: '<p>Column 1</p>' }];
         } else if (question.type === 'video') {
           element.type = 'videofeedback';
+        } else if (question.type === 'rating' || question.type === 'opinion-scale' || question.type === 'nps') {
+          element.type = 'rating';
+          element.rateMax = question.maxScale || (question.type === 'nps' ? 10 : 5);
+          element.minRateDescription = question.lowLabel;
+          element.maxRateDescription = question.highLabel;
+        } else {
+          // Fallback for unknown types
+          element.type = 'comment';
         }
         
         backendPages.push({
@@ -127,23 +133,7 @@ export const BuilderPage: React.FC = () => {
         // Step 2: Download the regenerated document
         const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
         
-        const response = await fetch(regenerateResponse.doc_link);
-        
-        if (!response.ok) {
-          throw new Error('Failed to download survey document');
-        }
-        
-        const blob = await response.blob();
-        
-        // Create a download link and trigger download
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        await ApiEndpoints.downloadFileByUrl(regenerateResponse.doc_link, filename);
         
         addNotification({
           type: 'success',
@@ -163,7 +153,7 @@ export const BuilderPage: React.FC = () => {
       addNotification({
         type: 'error',
         title: 'Save Failed',
-        message: error.message || 'Failed to save and download survey. Please try again.',
+        message: error.detail || error.message || 'Failed to save and download survey. Please try again.',
         duration: 4000,
       });
     } finally {

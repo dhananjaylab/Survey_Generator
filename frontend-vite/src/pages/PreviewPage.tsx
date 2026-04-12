@@ -235,6 +235,64 @@ export const PreviewPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      <Modal 
+        isOpen={showSuccessModal} 
+        onClose={() => setShowSuccessModal(false)}
+        className="max-w-2xl p-0 overflow-hidden rounded-[32px] border-none shadow-2xl"
+      >
+        <div className="bg-white p-12 text-center">
+          <div className="mb-8 flex justify-center">
+            <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center animate-bounce duration-1000">
+              <svg className="w-12 h-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </div>
+          
+          <h2 className="text-4xl font-black text-gray-900 mb-4 tracking-tight">Survey Completed!</h2>
+          <p className="text-xl text-gray-500 font-medium mb-10">Your response has been successfully simulated.</p>
+          
+          <div className="bg-gray-50 rounded-3xl p-8 mb-10 text-left">
+            <h3 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-4">Captured Answers</h3>
+            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-4 custom-scrollbar">
+              {Object.entries(answers).map(([questionId, answer]) => {
+                const question = questions.find(q => q.id === questionId);
+                return (
+                  <div key={questionId} className="border-b border-gray-100 pb-3 last:border-0">
+                    <p className="text-sm font-bold text-gray-900 mb-1">{question?.title || questionId}</p>
+                    <p className="text-base text-gray-600 font-medium whitespace-pre-wrap">
+                      {typeof answer === 'object' ? JSON.stringify(answer) : String(answer)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          
+          <div className="flex flex-col space-y-4">
+            <Button 
+              size="lg" 
+              className="w-full py-6 rounded-2xl text-xl font-bold shadow-xl shadow-blue-500/20"
+              onClick={() => {
+                setShowSuccessModal(false);
+                setCurrentQuestionIndex(-1);
+                setAnswers({});
+              }}
+            >
+              Restart Preview
+            </Button>
+            <Button 
+              variant="outline" 
+              size="lg" 
+              className="w-full py-6 rounded-2xl text-xl font-bold border-2"
+              onClick={() => navigate('/builder')}
+            >
+              Back to Editor
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

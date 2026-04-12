@@ -1,10 +1,15 @@
 import json
 import logging
+import asyncio
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from pathlib import Path
+from docx import Document
 import secrets
+import re
+import uuid
 from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (
@@ -14,6 +19,7 @@ from app.models.schemas import (
     SurveyListItem, SurveyListResponse, SurveySettingsUpdateRequest
 )
 from app.services.ai_service import AIService
+from app.services.storage_service import StorageService
 from app.tasks.survey_tasks import update_survey_status
 from app.core.config import settings
 from app.core.auth import verify_token
@@ -357,10 +363,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
     logger.info("document_regeneration_requested", request_id=req.request_id, project_name=req.project_name)
     
     try:
-        from docx import Document
-        from pathlib import Path
-        import uuid
-        
         # Load template
         assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
         template_path = assets_dir / "template_new.docx"
@@ -395,7 +397,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                 # Extract question title (strip HTML tags)
                 title = element.get('title', '')
                 if '<p>' in title:
-                    import re
                     title = re.sub(r'<[^>]+>', '', title)
                 
                 run = p.add_run(f"{title}")
@@ -410,7 +411,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for choice in choices:
                         choice_text = choice.get('text', choice.get('value', ''))
                         if '<p>' in choice_text:
-                            import re
                             choice_text = re.sub(r'<[^>]+>', '', choice_text)
                         doc.add_paragraph(choice_text, style='List Bullet 2')
                 
@@ -423,7 +423,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for row in rows:
                         row_text = row.get('text', row.get('value', ''))
                         if '<p>' in row_text:
-                            import re
                             row_text = re.sub(r'<[^>]+>', '', row_text)
                         doc.add_paragraph(row_text, style='List Bullet 3')
                     
@@ -431,13 +430,19 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for col in columns:
                         col_text = col.get('text', col.get('value', ''))
                         if '<p>' in col_text:
-                            import re
                             col_text = re.sub(r'<[^>]+>', '', col_text)
                         doc.add_paragraph(col_text, style='List Bullet 3')
                 
                 elif q_type == 'comment':
                     # Open-ended question
                     doc.add_paragraph("[Open-ended text response]", style='List Bullet 2')
+                
+                elif q_type == 'rating':
+                    # Rating scale
+                    max_rate = element.get('rateMax', 5)
+                    low = element.get('minRateDescription', 'Low')
+                    high = element.get('maxRateDescription', 'High')
+                    doc.add_paragraph(f"Scale: 1 to {max_rate} ({low} to {high})", style='List Bullet 2')
                 
                 doc.add_paragraph()  # Spacer
                 question_number += 1
@@ -451,17 +456,17 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
         
         logger.info("document_regenerated", request_id=req.request_id, filename=filename)
         
-        # Upload to cloud storage
-        from app.services.storage_service import StorageService
+        # Upload to cloud storage in a thread pool to avoid blocking the event loop
         storage_service = StorageService()
-        r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
+        r2_url = await asyncio.to_thread(storage_service.upload_file, str(output_path), f"questionnaires/{filename}")
+        
+        # Always use the local download proxy for the doc_link to avoid CORS issues
+        doc_link = f"/api/v1/files/download/{filename}"
         
         if r2_url:
-            doc_link = r2_url
             logger.info("document_uploaded_to_r2", request_id=req.request_id, url=r2_url)
         else:
             logger.warning("r2_upload_failed", request_id=req.request_id)
-            doc_link = f"/api/v1/files/download/{filename}"
         
         # Update database record
         record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
