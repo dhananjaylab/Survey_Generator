@@ -1,8 +1,10 @@
 import * as React from 'react';
 import { useSurveyStore } from '@/stores/surveyStore';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/utils/cn';
+import { getEmbedUrl } from '@/utils/helpers';
 
 export const PreviewPage: React.FC = () => {
   const { currentSurvey } = useSurveyStore();
@@ -10,6 +12,7 @@ export const PreviewPage: React.FC = () => {
   const [viewMode, setViewMode] = React.useState<'desktop' | 'mobile'>('desktop');
   const [currentQuestionIndex, setCurrentQuestionIndex] = React.useState<number>(-1); // -1 is the "Welcome" screen
   const [answers, setAnswers] = React.useState<Record<string, any>>({});
+  const [showSuccessModal, setShowSuccessModal] = React.useState(false);
   
   if (!currentSurvey) {
     return (
@@ -37,7 +40,7 @@ export const PreviewPage: React.FC = () => {
   };
 
   const handleSimulateResponse = () => {
-    alert("Survey submission simulated successfully! Answers: " + JSON.stringify(answers));
+    setShowSuccessModal(true);
   };
 
   return (
@@ -123,7 +126,7 @@ export const PreviewPage: React.FC = () => {
                     <div className="aspect-video w-full rounded-3xl overflow-hidden shadow-2xl bg-black border border-gray-100">
                       {questions[currentQuestionIndex].videoUrl ? (
                         <iframe 
-                          src={questions[currentQuestionIndex].videoUrl} 
+                          src={getEmbedUrl(questions[currentQuestionIndex].videoUrl)} 
                           className="w-full h-full" 
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                           allowFullScreen

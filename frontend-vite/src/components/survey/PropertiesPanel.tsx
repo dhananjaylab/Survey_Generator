@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useSurveyStore } from '@/stores/surveyStore';
 import type { Question } from '@/types/survey';
+import { getEmbedUrl } from '@/utils/helpers';
 
 interface PropertiesPanelProps {
   selectedQuestionId: string | null;
@@ -172,11 +173,11 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ selectedQuesti
                 type="text"
                 placeholder="https://www.youtube.com/embed/..."
                 value={question.videoUrl || ''}
-                onChange={(e) => updateQuestion({ videoUrl: e.target.value })}
+                onChange={(e) => updateQuestion({ videoUrl: getEmbedUrl(e.target.value) })}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border outline-none font-mono text-xs"
               />
               <p className="text-xs text-gray-500 mt-2">
-                Make sure to use the <strong>embed</strong> URL format, not the standard watch link.
+                Standard YouTube and Vimeo links are automatically converted to embed format.
               </p>
             </div>
           </div>
