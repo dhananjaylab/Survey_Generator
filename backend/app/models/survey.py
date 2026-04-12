@@ -19,8 +19,11 @@ class SurveyRequestRecord(Base):
     
     # Generated Metadata
     pages = Column(JSON, nullable=True) # SurveyJS questionnaire
+    settings = Column(JSON, nullable=True) # Behavioral triggers and configurations
     questionnaire_data = Column(JSON, nullable=True) # Raw questionnaire data
     doc_link = Column(String, nullable=True) # Generated DOCX file link
+    # User association
+    username = Column(String(255), nullable=True, index=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

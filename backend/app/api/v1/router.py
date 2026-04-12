@@ -1,18 +1,25 @@
 import json
 import logging
+import asyncio
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from pathlib import Path
+from docx import Document
 import secrets
+import re
+import uuid
 from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (
     BusinessOverviewRequest, BusinessOverviewResponse,
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse,
-    RegenerateSurveyDocRequest, RegenerateSurveyDocResponse
+    RegenerateSurveyDocRequest, RegenerateSurveyDocResponse,
+    SurveyListItem, SurveyListResponse, SurveySettingsUpdateRequest
 )
 from app.services.ai_service import AIService
+from app.services.storage_service import StorageService
 from app.tasks.survey_tasks import update_survey_status
 from app.core.config import settings
 from app.core.auth import verify_token
@@ -185,7 +192,8 @@ def generate_questionnaire(request: Request, req: SurveyGenerationRequest, db: S
                     use_case=req.use_case,
                     business_overview=req.business_overview,
                     research_objectives=req.research_objectives,
-                    status="STARTING"
+                    status="STARTING",
+                    username=request.state.user_id if hasattr(request.state, 'user_id') else None
                 )
                 db.add(record)
                 db.commit()
@@ -316,6 +324,7 @@ def get_survey_status(request: Request, request_id: str, db: Session = Depends(g
         "business_overview": record.business_overview or "",
         "research_objectives": record.research_objectives or "",
         "pages": record.pages or "",
+        "settings": record.settings,
         "doc_link": record.doc_link or "",
     }
 
@@ -354,10 +363,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
     logger.info("document_regeneration_requested", request_id=req.request_id, project_name=req.project_name)
     
     try:
-        from docx import Document
-        from pathlib import Path
-        import uuid
-        
         # Load template
         assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
         template_path = assets_dir / "template_new.docx"
@@ -392,7 +397,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                 # Extract question title (strip HTML tags)
                 title = element.get('title', '')
                 if '<p>' in title:
-                    import re
                     title = re.sub(r'<[^>]+>', '', title)
                 
                 run = p.add_run(f"{title}")
@@ -407,7 +411,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for choice in choices:
                         choice_text = choice.get('text', choice.get('value', ''))
                         if '<p>' in choice_text:
-                            import re
                             choice_text = re.sub(r'<[^>]+>', '', choice_text)
                         doc.add_paragraph(choice_text, style='List Bullet 2')
                 
@@ -420,7 +423,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for row in rows:
                         row_text = row.get('text', row.get('value', ''))
                         if '<p>' in row_text:
-                            import re
                             row_text = re.sub(r'<[^>]+>', '', row_text)
                         doc.add_paragraph(row_text, style='List Bullet 3')
                     
@@ -428,7 +430,6 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     for col in columns:
                         col_text = col.get('text', col.get('value', ''))
                         if '<p>' in col_text:
-                            import re
                             col_text = re.sub(r'<[^>]+>', '', col_text)
                         doc.add_paragraph(col_text, style='List Bullet 3')
                 
@@ -436,29 +437,36 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                     # Open-ended question
                     doc.add_paragraph("[Open-ended text response]", style='List Bullet 2')
                 
+                elif q_type == 'rating':
+                    # Rating scale
+                    max_rate = element.get('rateMax', 5)
+                    low = element.get('minRateDescription', 'Low')
+                    high = element.get('maxRateDescription', 'High')
+                    doc.add_paragraph(f"Scale: 1 to {max_rate} ({low} to {high})", style='List Bullet 2')
+                
                 doc.add_paragraph()  # Spacer
                 question_number += 1
         
-        # Save document
-        output_dir = Path(__file__).resolve().parent.parent.parent.parent / "questionnaires"
-        output_dir.mkdir(exist_ok=True)
-        filename = f"{req.project_name.replace(' ', '_')}_questionnaire_{req.request_id}_updated.docx"
-        output_path = output_dir / filename
-        doc.save(str(output_path))
+        # Generate document in memory
+        from io import BytesIO
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
         
+        filename = f"{req.project_name.replace(' ', '_')}_questionnaire_{req.request_id}_updated.docx"
         logger.info("document_regenerated", request_id=req.request_id, filename=filename)
         
-        # Upload to cloud storage
-        from app.services.storage_service import StorageService
+        # Upload to cloud storage from memory in a thread pool
         storage_service = StorageService()
-        r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
+        r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
+        
+        # Always use the local download proxy for the doc_link to avoid CORS issues
+        doc_link = f"/api/v1/files/download/{filename}"
         
         if r2_url:
-            doc_link = r2_url
             logger.info("document_uploaded_to_r2", request_id=req.request_id, url=r2_url)
         else:
             logger.warning("r2_upload_failed", request_id=req.request_id)
-            doc_link = f"/api/v1/files/download/{filename}"
         
         # Update database record
         record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
@@ -479,3 +487,81 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
         logger.error("document_regeneration_error", request_id=req.request_id, error=str(e))
         metrics.record_error(type(e).__name__)
         raise HTTPException(status_code=500, detail=str(e))
+        
+@router.post("/settings")
+@limiter.limit("20/minute")
+async def update_survey_settings(request: Request, req: SurveySettingsUpdateRequest, db: Session = Depends(get_db)):
+    """Update behavioral triggers and targeting settings immediately."""
+    logger.info("settings_update_requested", request_id=req.request_id)
+    
+    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == req.request_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Survey not found")
+        
+    try:
+        record.settings = req.settings
+        db.commit()
+        logger.info("settings_updated_successfully", request_id=req.request_id)
+        return {"success": 1, "settings": record.settings}
+    except Exception as e:
+        db.rollback()
+        logger.error("settings_update_error", request_id=req.request_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/", response_model=SurveyListResponse)
+@limiter.limit("30/minute")
+def list_surveys(request: Request, db: Session = Depends(get_db)):
+    """
+    List all surveys belonging to the authenticated user.
+    Also includes surveys with no username (System Surveys).
+    """
+    from sqlalchemy import or_
+    user_id = request.state.user_id if hasattr(request.state, 'user_id') else None
+    
+    if not user_id:
+        # Fallback if verify_token didn't set request.state.user_id correctly
+        # though verify_token should have handled this
+        logger.warning("list_surveys_no_user_in_state")
+        raise HTTPException(status_code=401, detail="User not identified")
+
+    # Fetch surveys for user OR system surveys (username is NULL)
+    surveys = db.query(SurveyRequestRecord).filter(
+        or_(SurveyRequestRecord.username == user_id, SurveyRequestRecord.username.is_(None))
+    ).order_by(SurveyRequestRecord.created_at.desc()).all()
+    
+    return {
+        "success": 1,
+        "surveys": [
+            {
+                "request_id": s.request_id,
+                "project_name": s.project_name,
+                "company_name": s.company_name,
+                "industry": s.industry,
+                "status": s.status,
+                "created_at": s.created_at,
+                "doc_link": s.doc_link
+            } for s in surveys
+        ]
+    }
+
+@router.delete("/{request_id}")
+@limiter.limit("10/minute")
+def delete_survey(request: Request, request_id: str, db: Session = Depends(get_db)):
+    """Delete a survey owned by the user."""
+    user_id = request.state.user_id if hasattr(request.state, 'user_id') else None
+    
+    record = db.query(SurveyRequestRecord).filter(SurveyRequestRecord.request_id == request_id).first()
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    
+    # Check ownership (unless it's a system survey and we allow anyone to delete? 
+    # Usually only owner or admin can delete. For now, owner or system survey can be deleted by user)
+    if record.username and record.username != user_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this survey")
+    
+    db.delete(record)
+    db.commit()
+    
+    logger.info("survey_deleted", request_id=request_id, user_id=user_id)
+    return {"success": 1, "message": "Survey deleted successfully"}

@@ -70,11 +70,28 @@ export class ApiEndpoints {
     return httpService.get<SurveyStatusResponse>(`/api/v1/surveys/status/${requestId}`);
   }
 
+  static async getUserSurveys(): Promise<{ success: number; surveys: any[] }> {
+    return httpService.get('/api/v1/surveys/');
+  }
+
+  static async deleteSurvey(requestId: string): Promise<{ success: number; message: string }> {
+    return httpService.delete(`/api/v1/surveys/${requestId}`);
+  }
+
   static async regenerateSurveyDocument(request: RegenerateSurveyDocRequest): Promise<RegenerateSurveyDocResponse> {
     return httpService.post<RegenerateSurveyDocResponse>('/api/v1/surveys/regenerate-document', request);
   }
 
+  static async updateSurveySettings(requestId: string, settings: any): Promise<{ success: number; settings: any }> {
+    return httpService.post('/api/v1/surveys/settings', { request_id: requestId, settings });
+  }
+
   // File endpoints
+  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
+    console.log('📥 [API] Downloading file from URL:', url);
+    return httpService.downloadFile(url, filename);
+  }
+
   static async downloadSurveyDocument(filename: string): Promise<void> {
     return httpService.downloadFile(`/api/v1/files/download/${filename}`, filename);
   }

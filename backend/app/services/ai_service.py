@@ -13,11 +13,13 @@ import logging
 import redis.asyncio as aioredis
 import json
 import hashlib
+from duckduckgo_search import DDGS
 
 from app.core.config import settings
 from app.utils.prompts import PromptTemplates
 
 logger = logging.getLogger(__name__)
+
 
 class AIService:
     """Service for AI-powered content generation with caching and retry logic.
@@ -99,21 +101,23 @@ class AIService:
         retry=retry_if_exception_type((Exception,)),
         reraise=True
     )
-    async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None) -> str:
+    async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None, force_json: bool = False) -> str:
         """Call the configured LLM (OpenAI GPT or Google Gemini)."""
         call_start = time.time()
         try:
             if self.llm_model == "gpt":
                 model_name = settings.CHATGPT_MODEL
                 logger.info(f"LLM_CALL_START: Using {model_name} (OpenAI GPT)")
-                
-                # OpenAI API call
-                response = await self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=temperature or 0.7,
-                    max_tokens=max_tokens or 2000,
-                )
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": temperature or 0.7,
+                    "max_tokens": max_tokens or 2000,
+                }
+                if force_json:
+                    kwargs["response_format"] = {"type": "json_object"}
+                    
+                response = await self.client.chat.completions.create(**kwargs)
                 result = response.choices[0].message.content.strip()
                 
                 elapsed = time.time() - call_start
@@ -136,16 +140,32 @@ class AIService:
                         "role": gemini_role,
                         "parts": [{"text": content}]
                     })
+                config = {
+                    "temperature": temperature or 0.7,
+                    "max_output_tokens": max_tokens or 2000,
+                }
                 
+                # Turn off safety settings which were incorrectly truncating demographic questions
+                from google.genai import types
+                
+                if force_json:
+                    config["response_mime_type"] = "application/json"
+
                 # Call Gemini API using google-genai SDK
                 response = self.gemini_client.models.generate_content(
                     model=model_name,
                     contents=contents,
-                    config={
-                        "temperature": temperature or 0.7,
-                        "max_output_tokens": max_tokens or 2000,
-                    }
+                    config=types.GenerateContentConfig(
+                        **config,
+                        safety_settings=[
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        ]
+                    )
                 )
+
                 result = response.text.strip()
                 
                 elapsed = time.time() - call_start
@@ -164,9 +184,21 @@ class AIService:
         
         messages = self.prompt_templates.get_business_overview_prompt(company_name)
         result = await self._call_llm(messages=messages, temperature=settings.BusinessOverviewTemperature, max_tokens=settings.BusinessOverviewMaxToken)
-        overview = f"{company_name} is {result}"
         
+        # Strip exact match prefix if the LLM output it natively
+        lower_result = result.lower().strip()
+        lower_company = company_name.lower().strip()
+        
+        if lower_result.startswith(f"{lower_company} is"):
+            overview = result
+        elif lower_result.startswith(lower_company):
+            # Sometimes it might just output "Amazon, a leading..."
+            overview = result
+        else:
+            overview = f"{company_name} is {result}"
+            
         await self._set_cached(cache_key, overview)
+
         return overview
     
     async def generate_research_objectives(self, company_name, business_overview, industry, use_case, use_cache=True):
@@ -361,3 +393,103 @@ Questions:
         total_elapsed = time.time() - start_time
         logger.info(f"Optimized batch choice generation completed in {total_elapsed:.2f}s")
         return questions
+
+    async def generate_survey_json(self, company_name: str, business_overview: str, research_objectives: str, use_web_search: bool = False) -> List[Dict[str, Any]]:
+        """Single-pass JSON generation of the entire survey."""
+        context = ""
+        if use_web_search:
+            try:
+                results = DDGS().text(f"{company_name} industry survey questions trends", max_results=3)
+                context = "\nWeb Search Insights:\n" + "\n".join([f"- {r['body']}" for r in results])
+                logger.info(f"Web search retrieved {len(results)} snippets.")
+            except Exception as e:
+                logger.warning(f"Web search failed: {e}")
+
+        # Construct a strict JSON prompt
+        prompt = f"""You are an expert market researcher at {company_name}.
+Your job is to create an online survey questionnaire for a research project.
+
+BUSINESS OVERVIEW:
+{business_overview}
+
+RESEARCH OBJECTIVES:
+{research_objectives}
+{context}
+
+INSTRUCTIONS:
+1. Develop a high-quality market research questionnaire with a mix of 'Multiple Choice', 'Open-ended', and 'Matrix' questions.
+2. Provide exactly 15 to 20 well-thought-out questions.
+3. Determine the required answer choices based on the question type.
+   - For 'Multiple Choice': Provide an array of string choices.
+   - For 'Open-ended': Provide an empty array for choices.
+   - For 'Matrix': Provide exactly an array of two arrays: [[row1, row2, ...], [col1, col2, ...]].
+
+You MUST output your response as a valid JSON object matching this structure EXACTLY:
+{{
+  "questions": [
+    {{
+      "type": "Multiple Choice",
+      "question": "Which of the following do you use?",
+      "choices": ["Option 1", "Option 2", "Option 3"]
+    }},
+    {{
+      "type": "Matrix",
+      "question": "Rate the following attributes:",
+      "choices": [
+        ["Attribute A", "Attribute B"],
+        ["Poor", "Average", "Excellent"]
+      ]
+    }},
+    {{
+      "type": "Open-ended",
+      "question": "What is your main reason?",
+      "choices": []
+    }}
+  ]
+}}
+Do NOT wrap the JSON in Markdown formatting like ```json ... ```. Output raw JSON only."""
+
+        messages = [{"role": "system", "content": "You are a helpful API that returns strictly valid JSON."}, {"role": "user", "content": prompt}]
+        
+        # Add internal retry loop for JSON generation
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                result_text = await self._call_llm(messages=messages, temperature=0.7 + (attempt * 0.1), max_tokens=6000, force_json=True)
+                
+                # Check if response was truncated abruptly
+                if not result_text.strip().endswith('}'):
+                    # Force append brackets to try rescuing minor truncation
+                    result_text += ']}'
+                
+                # Clean potential markdown wrapping
+                result_text = result_text.strip()
+                if result_text.startswith("```json"):
+                    result_text = result_text[7:]
+                if result_text.startswith("```"):
+                    result_text = result_text[3:]
+                if result_text.endswith("```"):
+                    result_text = result_text[:-3]
+                result_text = result_text.strip()
+                
+                # Use regex to find the outermost JSON block in case of garbage around it
+                import re
+                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+                if json_match:
+                    result_text = json_match.group(0)
+                
+                data = json.loads(result_text)
+                
+                # Validate schema loosely
+                if "questions" not in data or not isinstance(data["questions"], list):
+                    raise ValueError("JSON response missing 'questions' array")
+                    
+                return data["questions"]
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}\nResponse excerpt: {result_text[:500]}...")
+                if attempt == max_attempts - 1:
+                    logger.error("All internal retries for JSON generation failed.")
+                    raise ValueError("The AI model returned invalid JSON structure after multiple attempts.")
+                # Wait briefly before retrying
+                await asyncio.sleep(2)

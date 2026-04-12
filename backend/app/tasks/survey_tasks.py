@@ -103,121 +103,22 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         business_overview = data["business_overview"]
         research_objectives = data["research_objectives"]
         project_name = data["project_name"]
+        use_web_search = data.get("use_web_search", False)
         
-        # STEP 1: Questionnaire
+        # STEP 1: Fast JSON Generation
         step_start = time.time()
-        await publish_progress(request_id, "Drafting initial questionnaire...")
-        questions = await ai_service.generate_questionnaire(
-            company_name, business_overview, research_objectives
+        await publish_progress(request_id, "Drafting full questionnaire using AI JSON generation...")
+        
+        final_questions = await ai_service.generate_survey_json(
+            company_name, business_overview, research_objectives, use_web_search
         )
+        
         step_time = time.time() - step_start
-        logger.info("questionnaire_generated", request_id=request_id, question_count=len(questions), elapsed_seconds=step_time)
-        
-        questionnaire_str = "\n".join(questions)
-        
-        parsed_questions = []
-        for q in questions:
-            if "[" in q and "]" in q:
-                type_part = q.split("]")[0].split("[")[-1].strip()
-                question_part = q.split("]", 1)[1].strip()
-                parsed_questions.append({
-                    "type": type_part,
-                    "question": question_part,
-                    "choices": []
-                })
+        logger.info("survey_json_generated", request_id=request_id, question_count=len(final_questions), elapsed_seconds=step_time)
         
         # Publish QUESTIONS_GENERATED message
-        await publish_progress(request_id, f"QUESTIONS_GENERATED: {len(parsed_questions)} questions")
-
-        # STEP 2: Extra Questions (Parallel Generation)
-        step_start = time.time()
-        await publish_progress(request_id, "Adding Matrix and Open-ended questions if necessary...")
-        matrix_count = sum(1 for q in parsed_questions if q["type"] == "Matrix")
-        oe_count = sum(1 for q in parsed_questions if q["type"] == "Open-ended")
-        logger.info("extra_questions_step_started", request_id=request_id, matrix_count=matrix_count, oe_count=oe_count)
-        
-        # Generate all extra questions in parallel for better performance
-        extra_tasks = []
-        idx = len(parsed_questions)
-        
-        # Prepare Matrix questions
-        matrix_needed = max(0, settings.MinMatrixQuestions - matrix_count)
-        for i in range(matrix_needed):
-            idx += 1
-            extra_tasks.append(("Matrix", idx, ai_service.generate_extra_question(
-                company_name, business_overview, research_objectives, questionnaire_str, idx, "Matrix"
-            )))
-        
-        # Prepare Open-ended questions
-        oe_needed = max(0, settings.MinMatrixOEQuestions - oe_count)
-        for i in range(oe_needed):
-            idx += 1
-            extra_tasks.append(("Open-ended", idx, ai_service.generate_extra_question(
-                company_name, business_overview, research_objectives, questionnaire_str, idx, "Open-ended"
-            )))
-        
-        # Execute all in parallel
-        if extra_tasks:
-            logger.info("generating_extra_questions_parallel", request_id=request_id, count=len(extra_tasks))
-            results = await asyncio.gather(*[task[2] for task in extra_tasks], return_exceptions=True)
-            
-            for (q_type, q_idx, _), result in zip(extra_tasks, results):
-                if isinstance(result, Exception):
-                    logger.error("extra_question_generation_failed", request_id=request_id, type=q_type, error=str(result))
-                else:
-                    questionnaire_str += f"\n{result}"
-                    parsed_questions.append({"type": q_type, "question": result.split("]", 1)[1].strip(), "choices": []})
-        
-        step_time = time.time() - step_start
-        logger.info("extra_questions_completed", request_id=request_id, total_questions=len(parsed_questions), elapsed_seconds=step_time)
-            
-        # STEP 3: Batch Choices (Optimized)
-        step_start = time.time()
-        await publish_progress(request_id, "Generating answer choices...")
-        logger.info("batch_choices_generation_started", request_id=request_id, question_count=len(parsed_questions))
-        questions_with_choices = await ai_service.generate_batch_choices_optimized(
-            parsed_questions, company_name, business_overview, research_objectives
-        )
-        step_time = time.time() - step_start
-        logger.info("batch_choices_generated", request_id=request_id, elapsed_seconds=step_time)
-        
-        # Publish CHOICES_GENERATED message
-        await publish_progress(request_id, f"CHOICES_GENERATED: {len(questions_with_choices)} questions with choices")
-        
-        # STEP 4: Video Questions (Optional) - Run in parallel with filtering
-        video_task = None
-        if settings.INCLUDE_VIDEO_QUESTIONS:
-            await publish_progress(request_id, "Generating video questions...")
-            video_task = asyncio.create_task(ai_service.generate_video_questions(
-                company_name, business_overview, research_objectives
-            ))
-        
-        # STEP 5: Filtering (can run while video questions generate)
-        step_start = time.time()
-        seen = set()
-        final_questions = []
-        for q in questions_with_choices:
-            qt = q["question"].lower()
-            if any(k in qt for k in ["gender", "ethnicity", "your age", "how old"]): continue
-            if qt not in seen:
-                seen.add(qt)
-                final_questions.append(q)
-        step_time = time.time() - step_start
-        logger.info("filtering_complete", request_id=request_id, elapsed_seconds=step_time, final_question_count=len(final_questions))
-        
-        # Wait for video questions if they were being generated
-        if video_task:
-            try:
-                video_questions = await video_task
-                logger.info("video_questions_generated", request_id=request_id, count=len(video_questions))
-                for vq in video_questions:
-                    final_questions.append({
-                        "type": "Video",
-                        "question": vq.strip(),
-                        "choices": [""]
-                    })
-            except Exception as e:
-                logger.error("video_questions_generation_failed", request_id=request_id, error=str(e))
+        await publish_progress(request_id, f"QUESTIONS_GENERATED: {len(final_questions)} questions")
+        await publish_progress(request_id, "CHOICES_GENERATED: Answer choices structured")
 
         # STEP 6: Document Building
         step_start = time.time()
@@ -273,12 +174,15 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
             
             doc.add_paragraph() # Spacer
 
-        # Save result (Local Fallback)
-        output_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
-        output_dir.mkdir(exist_ok=True)
+        # Generate document in memory
+        from io import BytesIO
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+        
         filename = f"{project_name.replace(' ', '_')}_questionnaire_{request_id}.docx"
-        output_path = output_dir / filename
-        doc.save(str(output_path))
+        elapse = time.time() - step_start
+        logger.info("docx_memory_generated", request_id=request_id, elapsed_seconds=elapse)
         
         step_time = time.time() - step_start
         logger.info("docx_file_created", request_id=request_id, elapsed_seconds=step_time)
@@ -305,14 +209,15 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         await publish_progress(request_id, "Uploading DOCX file to cloud storage...")
         from app.services.storage_service import StorageService
         storage_service = StorageService()
-        r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
+        r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
+        
+        # Always use the local download proxy for the doc_link to avoid CORS issues
+        doc_link = f"/api/v1/files/download/{filename}"
         
         if r2_url:
-            doc_link = r2_url
             logger.info("file_uploaded_to_r2", request_id=request_id, url=r2_url)
         else:
             logger.warning("r2_upload_failed_using_local_fallback", request_id=request_id)
-            doc_link = f"/api/v1/files/download/{filename}"
         
         step_time = time.time() - step_start
         logger.info("file_uploaded", request_id=request_id, elapsed_seconds=step_time)

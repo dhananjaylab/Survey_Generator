@@ -36,6 +36,7 @@ class SurveyGenerationRequest(BaseModel):
     industry: str
     use_case: str
     llm_model: str = "gpt"
+    use_web_search: bool = False
 
 class SurveyStatusResponse(BaseModel):
     success: int
@@ -48,6 +49,7 @@ class SurveyStatusResponse(BaseModel):
     industry: str
     use_case: str
     pages: Any = ""
+    settings: Optional[Any] = None
     doc_link: str = ""
 
 class RegenerateSurveyDocRequest(BaseModel):
@@ -58,8 +60,25 @@ class RegenerateSurveyDocRequest(BaseModel):
     survey_description: str
     pages: List[Any]  # SurveyJS pages format
 
+class SurveySettingsUpdateRequest(BaseModel):
+    request_id: str
+    settings: Any # Survey triggers and configurations
+
 class RegenerateSurveyDocResponse(BaseModel):
     success: int
     request_id: str
     doc_link: str
     message: str
+
+class SurveyListItem(BaseModel):
+    request_id: str
+    project_name: Optional[str]
+    company_name: Optional[str]
+    industry: Optional[str]
+    status: str
+    created_at: Any
+    doc_link: Optional[str]
+
+class SurveyListResponse(BaseModel):
+    success: int
+    surveys: List[SurveyListItem]

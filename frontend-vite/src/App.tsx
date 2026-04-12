@@ -15,6 +15,7 @@ const ErrorPage = React.lazy(() => import('./pages').then(module => ({ default: 
 const CreateSurveyPage = React.lazy(() => import('./pages').then(module => ({ default: module.CreateSurveyPage })));
 const BuilderPage = React.lazy(() => import('./pages').then(module => ({ default: module.BuilderPage })));
 const PreviewPage = React.lazy(() => import('./pages').then(module => ({ default: module.PreviewPage })));
+const DashboardPage = React.lazy(() => import('./pages').then(module => ({ default: module.DashboardPage })));
 
 const SuspenseFallback = () => <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
@@ -33,6 +34,14 @@ function App() {
             <Route path="register" element={<RegisterPage />} />
             
             {/* Protected Routes */}
+            <Route
+              path="dashboard"
+              element={
+                <ProtectedRoute>
+                  <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="create"
               element={

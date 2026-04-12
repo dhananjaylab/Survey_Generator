@@ -130,7 +130,7 @@ source venv/bin/activate
 venv\Scripts\activate.bat
 
 # Start Celery worker
-celery -A app.core.celery worker --loglevel=info
+celery -A app.core.celery worker --loglevel=info --pool=solo
 ```
 
 **Expected Output:**

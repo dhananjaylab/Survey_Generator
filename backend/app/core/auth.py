@@ -1,7 +1,7 @@
 """JWT Authentication utilities for the Survey Generator API."""
 
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.security import decode_access_token
 from app.core.logging import get_logger
@@ -11,11 +11,12 @@ logger = get_logger(__name__)
 security = HTTPBearer()
 
 
-def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+def verify_token(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
     """
-    Verify JWT token from Authorization header.
+    Verify JWT token from Authorization header and set user_id in request state.
     
     Args:
+        request: FastAPI request object
         credentials: HTTP Bearer credentials from Authorization header
         
     Returns:
@@ -44,6 +45,9 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Set user_id in request state for downstream use
+    request.state.user_id = user_id
     
     logger.info("token_verified_successfully", user_id=user_id)
     return user_id
