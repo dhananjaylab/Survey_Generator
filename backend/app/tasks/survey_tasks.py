@@ -174,12 +174,15 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
             
             doc.add_paragraph() # Spacer
 
-        # Save result (Local Fallback)
-        output_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
-        output_dir.mkdir(exist_ok=True)
+        # Generate document in memory
+        from io import BytesIO
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+        
         filename = f"{project_name.replace(' ', '_')}_questionnaire_{request_id}.docx"
-        output_path = output_dir / filename
-        doc.save(str(output_path))
+        elapse = time.time() - step_start
+        logger.info("docx_memory_generated", request_id=request_id, elapsed_seconds=elapse)
         
         step_time = time.time() - step_start
         logger.info("docx_file_created", request_id=request_id, elapsed_seconds=step_time)
@@ -206,7 +209,7 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         await publish_progress(request_id, "Uploading DOCX file to cloud storage...")
         from app.services.storage_service import StorageService
         storage_service = StorageService()
-        r2_url = storage_service.upload_file(str(output_path), f"questionnaires/{filename}")
+        r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
         
         # Always use the local download proxy for the doc_link to avoid CORS issues
         doc_link = f"/api/v1/files/download/{filename}"

@@ -447,18 +447,18 @@ async def regenerate_survey_document(request: Request, req: RegenerateSurveyDocR
                 doc.add_paragraph()  # Spacer
                 question_number += 1
         
-        # Save document
-        output_dir = Path(__file__).resolve().parent.parent.parent.parent / "questionnaires"
-        output_dir.mkdir(exist_ok=True)
-        filename = f"{req.project_name.replace(' ', '_')}_questionnaire_{req.request_id}_updated.docx"
-        output_path = output_dir / filename
-        doc.save(str(output_path))
+        # Generate document in memory
+        from io import BytesIO
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
         
+        filename = f"{req.project_name.replace(' ', '_')}_questionnaire_{req.request_id}_updated.docx"
         logger.info("document_regenerated", request_id=req.request_id, filename=filename)
         
-        # Upload to cloud storage in a thread pool to avoid blocking the event loop
+        # Upload to cloud storage from memory in a thread pool
         storage_service = StorageService()
-        r2_url = await asyncio.to_thread(storage_service.upload_file, str(output_path), f"questionnaires/{filename}")
+        r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
         
         # Always use the local download proxy for the doc_link to avoid CORS issues
         doc_link = f"/api/v1/files/download/{filename}"
