@@ -1,11 +1,12 @@
 // Debug version of httpService to log token retrieval
 import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig } from 'axios';
+import { API_BASE_URL } from '@/constants/api';
 
 class HttpServiceDebug {
   private client: AxiosInstance;
 
-  constructor(baseURL: string = 'http://localhost:8000') {
+  constructor(baseURL: string = API_BASE_URL) {
     this.client = axios.create({
       baseURL,
       timeout: 30000,

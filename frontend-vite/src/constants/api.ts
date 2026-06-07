@@ -1,6 +1,22 @@
 // API Constants
 // This file contains all API-related constants
 
+/**
+ * Base URL for all HTTP API requests.
+ * Reads from VITE_API_BASE_URL in .env.development / .env.production.
+ * Falls back to localhost:8000 for local development only.
+ */
+export const API_BASE_URL: string =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+/**
+ * Base URL for WebSocket connections.
+ * Reads from VITE_WS_BASE_URL in .env.development / .env.production.
+ * Falls back to ws://localhost:8000 for local development only.
+ */
+export const WS_BASE_URL: string =
+  import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000';
+
 export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/api/v1/auth/login',

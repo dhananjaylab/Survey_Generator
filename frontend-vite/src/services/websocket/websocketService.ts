@@ -1,4 +1,5 @@
 import type { WebSocketMessage, WebSocketStatus } from '@/types/websocket';
+import { WS_BASE_URL } from '@/constants/api';
 
 export class WebSocketService {
   private ws: WebSocket | null = null;
@@ -11,7 +12,7 @@ export class WebSocketService {
   private isManualClose = false;
   private reconnectTimeoutId: number | null = null;
 
-  constructor(baseUrl: string = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000') {
+  constructor(baseUrl: string = WS_BASE_URL) {
     this.url = baseUrl;
   }
 

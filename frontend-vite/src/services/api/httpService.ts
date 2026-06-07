@@ -2,13 +2,14 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 import type { ApiError } from '@/types/api';
 import type { AuthTokens } from '@/types/auth';
+import { API_BASE_URL } from '@/constants/api';
 
 class HttpService {
   private client: AxiosInstance;
   private maxRetries: number = 3;
   private retryDelay: number = 1000;
 
-  constructor(baseURL: string = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000') {
+  constructor(baseURL: string = API_BASE_URL) {
     
     try {
       this.client = axios.create({
