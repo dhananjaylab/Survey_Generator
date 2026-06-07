@@ -181,9 +181,6 @@ async def async_generate_survey(request_id: str, data: Dict[str, Any], llm_model
         doc_io.seek(0)
         
         filename = f"{project_name.replace(' ', '_')}_questionnaire_{request_id}.docx"
-        elapse = time.time() - step_start
-        logger.info("docx_memory_generated", request_id=request_id, elapsed_seconds=elapse)
-        
         step_time = time.time() - step_start
         logger.info("docx_file_created", request_id=request_id, elapsed_seconds=step_time)
         

@@ -58,13 +58,3 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSO
         }
     )
 
-
-# Rate limit definitions
-RATE_LIMITS = {
-    "global": "100/minute",
-    "generate": "10/minute",
-    "login": "5/minute",
-    "business_overview": "20/minute",
-    "research_objectives": "20/minute",
-    "status": "30/minute",
-}
