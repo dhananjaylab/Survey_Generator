@@ -60,6 +60,13 @@ class RegenerateSurveyDocRequest(BaseModel):
     survey_description: str
     pages: List[Any]  # SurveyJS pages format
 
+class GenerateUseCaseRequest(BaseModel):
+    project_name: str
+    company_name: str
+    industry: str = ""
+    existing_use_case: str = ""
+    llm_model: str = "gpt"
+
 class SurveySettingsUpdateRequest(BaseModel):
     request_id: str
     settings: Any # Survey triggers and configurations

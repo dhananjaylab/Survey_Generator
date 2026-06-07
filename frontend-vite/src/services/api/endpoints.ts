@@ -29,6 +29,16 @@ export class ApiEndpoints {
     return httpService.post<AuthTokens>('/api/v1/auth/register', data);
   }
 
+  static async generateUseCase(data: {
+    project_name: string;
+    company_name: string;
+    industry: string;
+    existing_use_case?: string;
+    llm_model?: string;
+  }): Promise<{ success: number; use_case: string }> {
+    return httpService.post('/api/v1/surveys/generate-use-case', data);
+  }
+
   // Survey endpoints
   static async generateBusinessOverview(request: BusinessOverviewRequest): Promise<BusinessOverviewResponse> {
     console.log('📊 [API] Generating business overview...');

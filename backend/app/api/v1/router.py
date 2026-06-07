@@ -16,7 +16,8 @@ from app.models.schemas import (
     BusinessOverviewRequest, BusinessOverviewResponse,
     ResearchObjectiveRequest, SurveyGenerationRequest, SurveyStatusResponse,
     RegenerateSurveyDocRequest, RegenerateSurveyDocResponse,
-    SurveyListItem, SurveyListResponse, SurveySettingsUpdateRequest
+    SurveyListItem, SurveyListResponse, SurveySettingsUpdateRequest,
+    GenerateUseCaseRequest
 )
 from app.services.ai_service import AIService
 from app.services.storage_service import StorageService
@@ -61,13 +62,13 @@ async def get_business_overview(request: Request, req: BusinessOverviewRequest):
 
 @router.post("/generate-use-case")
 @limiter.limit("20/minute")
-async def generate_use_case(request: Request, req: dict):
+async def generate_use_case(request: Request, req: GenerateUseCaseRequest):
     """Generate a descriptive use case based on project details"""
-    project_name = req.get("project_name", "")
-    company_name = req.get("company_name", "")
-    industry = req.get("industry", "")
-    existing_use_case = req.get("existing_use_case", "")
-    llm_model = req.get("llm_model", "gpt")
+    project_name = req.project_name
+    company_name = req.company_name
+    industry = req.industry
+    existing_use_case = req.existing_use_case
+    llm_model = req.llm_model
     
     logger.info("use_case_generation_requested", project_name=project_name, company_name=company_name, industry=industry, llm_model=llm_model)
     

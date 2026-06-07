@@ -231,43 +231,14 @@ export const CreateSurveyPage: React.FC = () => {
 
     setIsGeneratingUseCase(true);
     try {
-      let token = '';
-      const authStore = localStorage.getItem('auth-store');
-      if (authStore) {
-        const parsed = JSON.parse(authStore);
-        token = parsed.state?.tokens?.access_token || '';
-      }
-      
-      if (!token) {
-        const authTokens = localStorage.getItem('auth-tokens');
-        if (authTokens) {
-          const parsed = JSON.parse(authTokens);
-          token = parsed.access_token || '';
-        }
-      }
-
-      const response = await fetch('http://localhost:8000/api/v1/surveys/generate-use-case', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          project_name: formData.projectName,
-          company_name: formData.companyName,
-          industry: formData.industry,
-          existing_use_case: formData.useCase || '',
-          llm_model: formData.llmProvider || 'gpt',
-        }),
+      const data = await ApiEndpoints.generateUseCase({
+        project_name: formData.projectName,
+        company_name: formData.companyName,
+        industry: formData.industry,
+        existing_use_case: formData.useCase || '',
+        llm_model: formData.llmProvider || 'gpt',
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate use case');
-      }
-
-      const data = await response.json();
       setFormData((prev) => ({ ...prev, useCase: data.use_case }));
-      
       addNotification({
         type: 'success',
         title: 'Use Case Generated',
@@ -277,7 +248,7 @@ export const CreateSurveyPage: React.FC = () => {
       addNotification({
         type: 'error',
         title: 'Generation Failed',
-        message: error.message || 'Failed to generate use case. Please try again.',
+        message: error.detail || error.message || 'Failed to generate use case. Please try again.',
       });
     } finally {
       setIsGeneratingUseCase(false);
