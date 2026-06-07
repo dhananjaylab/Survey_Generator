@@ -62,13 +62,19 @@ class HttpService {
         const originalRequest = error.config;
 
         // Handle 401 errors (token expired)
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        // Skip redirect if the 401 came FROM the login/register endpoint itself —
+        // that just means wrong credentials, not an expired session token.
+        const isAuthEndpoint =
+          originalRequest.url?.includes('/api/v1/auth/login') ||
+          originalRequest.url?.includes('/api/v1/auth/register');
+
+        if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
           originalRequest._retry = true;
           
-          // Clear stored tokens
+          // Clear stored tokens (session expired)
           this.clearStoredTokens();
           
-          // Redirect to login (will be handled by auth store later)
+          // Redirect to login
           if (typeof window !== 'undefined') {
             window.location.href = '/login';
           }
