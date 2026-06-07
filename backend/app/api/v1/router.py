@@ -1,15 +1,11 @@
 import json
-import logging
 import asyncio
-from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
 from docx import Document
-import secrets
 import re
-import uuid
 from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.models.schemas import (

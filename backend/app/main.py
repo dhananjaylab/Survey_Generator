@@ -1,6 +1,6 @@
-import logging
+import os
 import asyncio
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
@@ -8,7 +8,6 @@ from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.metrics import get_metrics_collector
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
-from app.core.auth import verify_token
 from slowapi.errors import RateLimitExceeded
 from app.api.v1 import router, files, websockets, auth
 from app.models.database import engine, Base
@@ -119,10 +118,6 @@ All errors return standard JSON format:
 
 For issues or questions, contact: support@example.com
 """
-
-import os
-
-is_development = os.getenv("ENVIRONMENT", "").lower() == "development"
 
 app = FastAPI(
     title="AI Survey Generator API",
