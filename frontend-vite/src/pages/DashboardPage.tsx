@@ -20,7 +20,7 @@ interface SurveyRecord {
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setIsLoading, addNotification } = useUIStore();
+  const { addNotification } = useUIStore();
   const [surveys, setSurveys] = React.useState<SurveyRecord[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);

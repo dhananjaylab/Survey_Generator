@@ -88,6 +88,7 @@ export const SurveyCanvas: React.FC<SurveyCanvasProps> = ({ onSelectQuestion, se
     if (targetPage) {
       const newQuestions = [...targetPage.questions];
       const [movedItem] = newQuestions.splice(draggedIndex, 1);
+      if (movedItem === undefined) return;
       newQuestions.splice(dropIndex, 0, movedItem);
       targetPage.questions = newQuestions;
       

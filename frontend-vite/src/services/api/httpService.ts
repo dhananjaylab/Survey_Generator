@@ -12,7 +12,8 @@
  *  - On refresh failure: logout + redirect to /login.
  *  - Sensitive data (tokens) redacted from http-debug logs.
  */
-import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError } from 'axios';
+import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '@/stores/authStore';
 import { logger } from '@/utils/logger';
 

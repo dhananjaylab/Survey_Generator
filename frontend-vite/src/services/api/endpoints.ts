@@ -106,8 +106,33 @@ export class ApiEndpoints {
     return response.data;
   }
 
+  /** Full regenerate with all survey data — used by the Builder page. */
+  static async regenerateSurveyDocument(payload: {
+    request_id: string;
+    project_name: string;
+    company_name: string;
+    survey_title: string;
+    survey_description?: string;
+    pages: unknown[];
+  }) {
+    logger.http('[endpoints] POST /surveys/regenerate-document (full)');
+    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
+    return response.data as { success: boolean; doc_link: string };
+  }
+
+  /** Alias for listSurveys — returns the authenticated user's surveys. */
+  static async getUserSurveys() {
+    return ApiEndpoints.listSurveys();
+  }
+
   static async getSettings() {
     const response = await httpService.get('/api/v1/surveys/settings');
+    return response.data;
+  }
+
+  static async updateSurveySettings(surveyId: string, settings: Record<string, unknown>) {
+    logger.http('[endpoints] PUT /surveys/' + surveyId + '/settings');
+    const response = await httpService.put(`/api/v1/surveys/${surveyId}/settings`, settings);
     return response.data;
   }
 
@@ -119,5 +144,23 @@ export class ApiEndpoints {
       responseType: 'blob',
     });
     return response.data;
+  }
+
+  /**
+   * Download a file from a pre-signed or absolute URL and trigger a browser save.
+   * Falls back gracefully if the URL is relative.
+   */
+  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
+    logger.http('[endpoints] GET file by URL: ' + filename);
+    const response = await httpService.get(url, { responseType: 'blob' });
+    const blob = new Blob([response.data as BlobPart]);
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(objectUrl);
   }
 }
