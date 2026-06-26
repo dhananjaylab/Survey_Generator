@@ -1,171 +1,113 @@
-import type { WebSocketMessage, WebSocketStatus } from '@/types/websocket';
-import { WS_BASE_URL } from '@/constants/api';
+/**
+ * WebSocket service — connects to /ws/survey/{requestId} with JWT auth.
+ *
+ * Phase 1 change: appends ?token=<access_token> to the connection URL,
+ * since the browser WebSocket API cannot send custom headers during
+ * the handshake. The backend validates this token and closes with
+ * 4001 (unauthorized) or 4003 (forbidden) on failure.
+ *
+ * Phase 2 change: does NOT attempt to reconnect on 4001/4003 — these
+ * are permanent auth failures, not transient network issues. Reconnect
+ * is only attempted for other close codes (1006, etc).
+ */
+import { useAuthStore } from '@/stores/authStore';
+import { logger } from '@/utils/logger';
+
+const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000';
+
+const AUTH_CLOSE_CODES = new Set([4001, 4003]);
+
+export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected' | 'failed';
+
+export interface ProgressMessage {
+  request_id: string;
+  update: string;
+  completed?: boolean;
+}
+
+function buildUrl(requestId: string): string {
+  const { tokens } = useAuthStore.getState();
+  const token = tokens?.access_token ?? '';
+  // encodeURIComponent guards against '+' / '/' / '=' in JWT being mangled
+  return `${WS_BASE_URL}/ws/survey/${requestId}?token=${encodeURIComponent(token)}`;
+}
 
 export class WebSocketService {
   private ws: WebSocket | null = null;
-  private url: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectInterval = 1000;
-  private listeners: Map<string, (message: WebSocketMessage) => void> = new Map();
-  private statusListeners: Set<(status: WebSocketStatus) => void> = new Set();
-  private isManualClose = false;
-  private reconnectTimeoutId: number | null = null;
+  private maxReconnectAttempts = 3;
+  private reconnectDelayMs = 2000;
+  private manualClose = false;
 
-  constructor(baseUrl: string = WS_BASE_URL) {
-    this.url = baseUrl;
+  connect(
+    requestId: string,
+    onMessage: (msg: ProgressMessage) => void,
+    onStatusChange: (status: WebSocketStatus) => void
+  ): void {
+    this.manualClose = false;
+    this._open(requestId, onMessage, onStatusChange);
   }
 
-  connect(requestId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
+  private _open(
+    requestId: string,
+    onMessage: (msg: ProgressMessage) => void,
+    onStatusChange: (status: WebSocketStatus) => void
+  ): void {
+    onStatusChange('connecting');
+
+    const url = buildUrl(requestId);
+    // Never log the full URL — it contains the JWT.
+    logger.debug(`[ws] connecting to /ws/survey/${requestId} (token redacted)`);
+
+    this.ws = new WebSocket(url);
+
+    this.ws.onopen = () => {
+      logger.debug('[ws] connected');
+      this.reconnectAttempts = 0;
+      onStatusChange('connected');
+    };
+
+    this.ws.onmessage = (event) => {
       try {
-        this.isManualClose = false;
-        const wsUrl = `${this.url}/ws/survey/${requestId}`;
-        
-        console.log(`Connecting to WebSocket: ${wsUrl}`);
-        this.ws = new WebSocket(wsUrl);
-
-        this.ws.onopen = () => {
-          console.log('WebSocket connected successfully');
-          this.reconnectAttempts = 0;
-          this.notifyStatusListeners('connected');
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data);
-            console.log('WebSocket message received:', message);
-            this.notifyListeners(requestId, message);
-          } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
-          }
-        };
-
-        this.ws.onclose = (event) => {
-          console.log('WebSocket closed:', event.code, event.reason);
-          this.notifyStatusListeners('disconnected');
-          
-          if (!this.isManualClose && this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.scheduleReconnect(requestId);
-          }
-        };
-
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          this.notifyStatusListeners('error');
-          reject(error);
-        };
-
-        // Connection timeout
-        setTimeout(() => {
-          if (this.ws?.readyState === WebSocket.CONNECTING) {
-            this.ws.close();
-            reject(new Error('WebSocket connection timeout'));
-          }
-        }, 5000);
-
-      } catch (error) {
-        reject(error);
+        const msg: ProgressMessage = JSON.parse(event.data);
+        onMessage(msg);
+      } catch (err) {
+        logger.warn('[ws] failed to parse message', err);
       }
-    });
-  }
+    };
 
-  private scheduleReconnect(requestId: string): void {
-    this.reconnectAttempts++;
-    const delay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1);
-    
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    this.notifyStatusListeners('connecting');
-    
-    this.reconnectTimeoutId = window.setTimeout(() => {
-      this.connect(requestId).catch((error) => {
-        console.error('Reconnection failed:', error);
-        
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-          console.error('Max reconnection attempts reached');
-          this.notifyStatusListeners('error');
-        }
-      });
-    }, delay);
+    this.ws.onclose = (event) => {
+      logger.debug(`[ws] closed — code=${event.code} reason=${event.reason}`);
+      onStatusChange('disconnected');
+
+      if (this.manualClose) return;
+
+      if (AUTH_CLOSE_CODES.has(event.code)) {
+        // Permanent auth failure — do not retry.
+        logger.warn(`[ws] auth failure (code ${event.code}) — not reconnecting`);
+        onStatusChange('failed');
+        return;
+      }
+
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnectAttempts += 1;
+        const delay = this.reconnectDelayMs * this.reconnectAttempts;
+        logger.debug(`[ws] reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        setTimeout(() => this._open(requestId, onMessage, onStatusChange), delay);
+      } else {
+        logger.warn('[ws] max reconnect attempts reached');
+        onStatusChange('failed');
+      }
+    };
+
+    this.ws.onerror = (err) => {
+      logger.warn('[ws] error', err);
+    };
   }
 
   disconnect(): void {
-    this.isManualClose = true;
-    
-    // Clear any pending reconnection attempts
-    if (this.reconnectTimeoutId) {
-      clearTimeout(this.reconnectTimeoutId);
-      this.reconnectTimeoutId = null;
-    }
-    
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    
-    this.listeners.clear();
-    this.reconnectAttempts = 0;
-    this.notifyStatusListeners('disconnected');
-  }
-
-  subscribe(requestId: string, callback: (message: WebSocketMessage) => void): () => void {
-    this.listeners.set(requestId, callback);
-    
-    // Return unsubscribe function
-    return () => {
-      this.listeners.delete(requestId);
-    };
-  }
-
-  onStatusChange(callback: (status: WebSocketStatus) => void): () => void {
-    this.statusListeners.add(callback);
-    
-    // Return unsubscribe function
-    return () => {
-      this.statusListeners.delete(callback);
-    };
-  }
-
-  private notifyListeners(requestId: string, message: WebSocketMessage): void {
-    const callback = this.listeners.get(requestId);
-    if (callback) {
-      callback(message);
-    }
-  }
-
-  private notifyStatusListeners(status: WebSocketStatus): void {
-    this.statusListeners.forEach(callback => callback(status));
-  }
-
-  getConnectionState(): WebSocketStatus {
-    if (!this.ws) return 'disconnected';
-    
-    switch (this.ws.readyState) {
-      case WebSocket.CONNECTING:
-        return 'connecting';
-      case WebSocket.OPEN:
-        return 'connected';
-      case WebSocket.CLOSING:
-      case WebSocket.CLOSED:
-        return 'disconnected';
-      default:
-        return 'error';
-    }
-  }
-
-  // Get current connection info for debugging
-  getConnectionInfo() {
-    return {
-      url: this.url,
-      readyState: this.ws?.readyState,
-      reconnectAttempts: this.reconnectAttempts,
-      maxReconnectAttempts: this.maxReconnectAttempts,
-      isManualClose: this.isManualClose,
-      listenersCount: this.listeners.size,
-      statusListenersCount: this.statusListeners.size,
-    };
+    this.manualClose = true;
+    this.ws?.close();
+    this.ws = null;
   }
 }
-
-export const websocketService = new WebSocketService();
