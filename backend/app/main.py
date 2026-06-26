@@ -105,7 +105,7 @@ try:
     @app.middleware("http")
     async def set_secure_headers(request, call_next):
         response = await call_next(request)
-        _secure.framework.fastapi(response)
+        _secure.set_headers(response)
         return response
 
     logger.info("security_headers_middleware_added")
