@@ -57,3 +57,6 @@ pytest==8.3.3
 pytest-asyncio==0.24.0
 httpx==0.28.1
 fakeredis==2.24.1
+
+python-json-logger==4.1.0
+crypto==1.4.1
