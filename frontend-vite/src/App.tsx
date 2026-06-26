@@ -1,26 +1,46 @@
+/**
+ * App.tsx — root component with routing.
+ *
+ * Phase 2 addition: each protected route is wrapped in <ErrorBoundary>.
+ * handleBoundaryError is the single hook point for Sentry (Phase 3):
+ *   Sentry.captureException(error, { extra: { componentStack: info.componentStack } })
+ *
+ * Lazy-loaded pages keep the initial bundle small; Suspense fallback
+ * shows a centered "Loading..." message during chunk fetch.
+ */
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { NotificationContainer } from './components/ui/Notification';
 import { LoadingOverlay } from './components/ui/Spinner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './hooks/useAuth';
-
-// Lazy loaded pages to optimize bundle size
+import { logger } from './utils/logger';
 import React, { Suspense } from 'react';
-const HomePage = React.lazy(() => import('./pages').then(module => ({ default: module.HomePage })));
-const LoginPage = React.lazy(() => import('./pages').then(module => ({ default: module.LoginPage })));
-const RegisterPage = React.lazy(() => import('./pages').then(module => ({ default: module.RegisterPage })));
-const ErrorPage = React.lazy(() => import('./pages').then(module => ({ default: module.ErrorPage })));
 
-const CreateSurveyPage = React.lazy(() => import('./pages').then(module => ({ default: module.CreateSurveyPage })));
-const BuilderPage = React.lazy(() => import('./pages').then(module => ({ default: module.BuilderPage })));
-const PreviewPage = React.lazy(() => import('./pages').then(module => ({ default: module.PreviewPage })));
-const DashboardPage = React.lazy(() => import('./pages').then(module => ({ default: module.DashboardPage })));
+const HomePage          = React.lazy(() => import('./pages').then((m) => ({ default: m.HomePage })));
+const LoginPage          = React.lazy(() => import('./pages').then((m) => ({ default: m.LoginPage })));
+const RegisterPage       = React.lazy(() => import('./pages').then((m) => ({ default: m.RegisterPage })));
+const ErrorPage          = React.lazy(() => import('./pages').then((m) => ({ default: m.ErrorPage })));
+const CreateSurveyPage   = React.lazy(() => import('./pages').then((m) => ({ default: m.CreateSurveyPage })));
+const BuilderPage        = React.lazy(() => import('./pages').then((m) => ({ default: m.BuilderPage })));
+const PreviewPage        = React.lazy(() => import('./pages').then((m) => ({ default: m.PreviewPage })));
+const DashboardPage      = React.lazy(() => import('./pages').then((m) => ({ default: m.DashboardPage })));
 
-const SuspenseFallback = () => <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+const SuspenseFallback = () => (
+  <div className="min-h-screen flex items-center justify-center">Loading...</div>
+);
+
+/** Phase 3: wire this to Sentry.captureException. */
+function handleBoundaryError(error: Error, info: React.ErrorInfo): void {
+  logger.error('[App] route-level error boundary triggered', {
+    message: error.message,
+    componentStack: info.componentStack,
+  });
+}
 
 function App() {
-  // Initialize auth listener
+  // Initializes auth state from persisted storage (no network call — see useAuth.ts)
   useAuth();
 
   return (
@@ -32,13 +52,16 @@ function App() {
             <Route index element={<HomePage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="register" element={<RegisterPage />} />
-            
-            {/* Protected Routes */}
+
+            {/* Protected Routes — each wrapped in its own ErrorBoundary so a
+                crash in one page doesn't take down the nav/layout shell. */}
             <Route
               path="dashboard"
               element={
                 <ProtectedRoute>
-                  <DashboardPage />
+                  <ErrorBoundary onError={handleBoundaryError}>
+                    <DashboardPage />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -46,7 +69,9 @@ function App() {
               path="create"
               element={
                 <ProtectedRoute>
-                  <CreateSurveyPage />
+                  <ErrorBoundary onError={handleBoundaryError}>
+                    <CreateSurveyPage />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -54,7 +79,9 @@ function App() {
               path="builder"
               element={
                 <ProtectedRoute>
-                  <BuilderPage />
+                  <ErrorBoundary onError={handleBoundaryError}>
+                    <BuilderPage />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -62,7 +89,9 @@ function App() {
               path="preview"
               element={
                 <ProtectedRoute>
-                  <PreviewPage />
+                  <ErrorBoundary onError={handleBoundaryError}>
+                    <PreviewPage />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -72,7 +101,7 @@ function App() {
           </Route>
         </Routes>
       </Suspense>
-      
+
       {/* Global Modals & Notifications */}
       <NotificationContainer />
       <LoadingOverlay />

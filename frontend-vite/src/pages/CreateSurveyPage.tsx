@@ -1,3 +1,26 @@
+/**
+ * CreateSurveyPage
+ *
+ * Phase 2 fixes applied:
+ *
+ * 1. completionFiredRef guard — prevents handleCompletion() from running
+ *    twice when both the WebSocket "SUCCESS" message AND the polling
+ *    interval detect COMPLETED status simultaneously.
+ *
+ * 2. hasFailed-gated polling fallback — polling only activates when
+ *    `hasFailed` is true (WS auth failure or exhausted reconnects).
+ *    Normal WS disconnects / temporary drops still use the WS path.
+ *
+ * 3. WebSocket status badge — small dot + label in the generation modal
+ *    shows real-time connection state (green/gray/yellow) so users know
+ *    whether they're getting live updates or polling.
+ *
+ * 4. All console.log replaced with logger.debug / logger.warn.
+ *
+ * 5. useWebSocket usage matches the actual hook API on disk:
+ *      useWebSocket(onMessage?) → {status, hasFailed, lastMessage, connect, disconnect}
+ *    `connect(requestId)` is called after the HTTP /generate response.
+ */
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSurveyStore } from '@/stores/surveyStore';
@@ -7,588 +30,499 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/FormField';
 import { Modal } from '@/components/ui/Modal';
-import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
-import { validateProjectSetup } from '@/utils/validation';
+import { logger } from '@/utils/logger';
 import type { Survey, Choice } from '@/types/survey';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const INDUSTRIES = [
+  'technology', 'healthcare', 'finance', 'education', 'retail',
+  'manufacturing', 'hospitality', 'real-estate', 'automotive',
+  'telecommunications', 'media', 'energy', 'transportation',
+  'agriculture', 'construction', 'pharmaceutical', 'insurance',
+  'legal', 'consulting', 'non-profit', 'government', 'other',
+];
+
+const STATUS_TERMINAL = new Set(['COMPLETED', 'FAILED']);
+
+// ── WebSocket status badge ─────────────────────────────────────────────────────
+
+function WsBadge({ status, hasFailed }: { status: string; hasFailed: boolean }) {
+  if (hasFailed) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-yellow-600">
+        <span className="h-2 w-2 rounded-full bg-yellow-400 animate-pulse" />
+        Polling fallback
+      </span>
+    );
+  }
+  if (status === 'connected') {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-green-600">
+        <span className="h-2 w-2 rounded-full bg-green-500" />
+        Live updates
+      </span>
+    );
+  }
+  if (status === 'connecting') {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span className="h-2 w-2 rounded-full bg-gray-400 animate-pulse" />
+        Connecting…
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-gray-400">
+      <span className="h-2 w-2 rounded-full bg-gray-300" />
+      Disconnected
+    </span>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
 
 export const CreateSurveyPage: React.FC = () => {
   const navigate = useNavigate();
-  const { 
-    currentProject,
+  const {
     setCurrentProject,
-    businessOverview,
     setBusinessOverview,
-    setError,
-    isGenerating,
     setIsGenerating,
+    isGenerating,
     setCurrentSurvey,
-    setCurrentSurveyDocLink
+    setCurrentSurveyDocLink,
+    setError,
   } = useSurveyStore();
-  const { setIsLoading, addNotification } = useUIStore();
+  const { addNotification } = useUIStore();
 
-  // Form state
-  const [formData, setFormData] = React.useState({
-    projectName: currentProject?.projectName || '',
-    companyName: currentProject?.companyName || '',
-    industry: currentProject?.industry || 'technology',
-    useCase: currentProject?.useCase || '',
-    llmProvider: currentProject?.llmProvider || 'gpt',
-    useWebSearch: false,
-  });
+  // ── Form state ───────────────────────────────────────────────────────────────
 
-  const [errors, setErrors] = React.useState<Record<string, string>>({});
-  const [isGeneratingUseCase, setIsGeneratingUseCase] = React.useState(false);
-  const [localOverview, setLocalOverview] = React.useState(businessOverview || '');
-  const [progressLog, setProgressLog] = React.useState<{time: string, message: string}[]>([]);
-  const [requestId, setRequestId] = React.useState<string | null>(null);
+  const [projectName, setProjectName] = React.useState('');
+  const [companyName, setCompanyName] = React.useState('');
+  const [industry, setIndustry] = React.useState('technology');
+  const [useCase, setUseCase] = React.useState('');
+  const [llmModel, setLlmModel] = React.useState<'gpt' | 'gemini'>('gpt');
+  const [useWebSearch, setUseWebSearch] = React.useState(false);
+  const [businessOverviewText, setBusinessOverviewText] = React.useState('');
   const [showOverview, setShowOverview] = React.useState(false);
+  const [formErrors, setFormErrors] = React.useState<Record<string, string>>({});
 
-  const [lastMessage, setLastMessage] = React.useState<any>(null);
+  // ── Generation state ─────────────────────────────────────────────────────────
 
-  // WebSocket integration
-  const { isConnected, connect, disconnect } = useWebSocket({
-    requestId,
-    onMessage: (msg) => {
-      setLastMessage(msg);
-    }
-  });
+  const [requestId, setRequestId] = React.useState<string | null>(null);
+  const [progressLog, setProgressLog] = React.useState<{ time: string; msg: string }[]>([]);
+  const [isAiThinking, setIsAiThinking] = React.useState(false);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
-    if (requestId) {
-      connect().catch(console.error);
-    }
-    return () => disconnect();
-  }, [requestId, connect, disconnect]);
+  /**
+   * Guards against the race condition where BOTH the WebSocket "SUCCESS"
+   * message AND the polling interval fire handleCompletion() in the same tick.
+   */
+  const completionFiredRef = React.useRef(false);
 
-  React.useEffect(() => {
-    if (lastMessage) {
-      setProgressLog((prev) => [...prev, { time: new Date().toLocaleTimeString(), message: lastMessage.update }]);
-      if (lastMessage.completed) {
-        setIsGenerating(false);
-        addNotification({
-          type: 'success',
-          title: 'Generation Complete',
-          message: 'Your survey has been successfully generated.',
-        });
-        fetchGeneratedSurvey();
+  // ── WebSocket ────────────────────────────────────────────────────────────────
+
+  const { status: wsStatus, hasFailed, connect: wsConnect, disconnect: wsDisconnect } =
+    useWebSocket((msg) => {
+      appendLog(msg.update);
+
+      if (msg.update === 'SUCCESS' || msg.completed) {
+        handleCompletion();
+      } else if (msg.update?.startsWith('ERROR')) {
+        handleFailure(msg.update);
       }
-    }
-  }, [lastMessage, setIsGenerating, addNotification]);
+    });
 
-  // Polling fallback
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  const appendLog = (text: string) => {
+    setProgressLog((prev) => [
+      ...prev,
+      { time: new Date().toLocaleTimeString(), msg: text },
+    ]);
+  };
+
+  // Auto-scroll log to bottom whenever a new entry arrives
   React.useEffect(() => {
-    if (!isGenerating || !requestId) return;
-    
-    const pollInterval = setInterval(async () => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [progressLog]);
+
+  // Disconnect WS on unmount
+  React.useEffect(() => () => wsDisconnect(), [wsDisconnect]);
+
+  // ── Polling fallback (only when WS has permanently failed) ────────────────────
+
+  React.useEffect(() => {
+    if (!isGenerating || !requestId || !hasFailed) return;
+
+    logger.debug('[create] WS failed — activating polling fallback');
+    appendLog('Switching to polling fallback…');
+
+    const interval = setInterval(async () => {
       try {
-        const response = await ApiEndpoints.getSurveyStatus(requestId);
-        
-        if (response.status === 'COMPLETED') {
-          clearInterval(pollInterval);
-          setIsGenerating(false);
-          setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'SUCCESS' }]);
-          addNotification({
-            type: 'success',
-            title: 'Generation Complete',
-            message: 'Your survey has been successfully generated.',
-          });
-          fetchGeneratedSurvey();
-        } else if (response.status === 'FAILED') {
-          clearInterval(pollInterval);
-          setIsGenerating(false);
-          setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'ERROR: Survey generation failed' }]);
-          addNotification({
-            type: 'error',
-            title: 'Generation Failed',
-            message: 'Survey generation encountered an error.',
-          });
+        const data = await ApiEndpoints.getSurveyStatus(requestId);
+        appendLog(`Status: ${data.status}`);
+
+        if (STATUS_TERMINAL.has(data.status)) {
+          clearInterval(interval);
+          if (data.status === 'COMPLETED') {
+            handleCompletion();
+          } else {
+            handleFailure('Survey generation failed');
+          }
         }
-      } catch (error) {
-        console.error('Polling error:', error);
+      } catch (err) {
+        logger.warn('[create] polling error', err);
       }
-    }, 3000);
+    }, 4_000);
 
-    return () => clearInterval(pollInterval);
-  }, [isGenerating, requestId]);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGenerating, requestId, hasFailed]);
 
-  const fetchGeneratedSurvey = async () => {
-    if (!requestId) return;
-    
-    try {
-      const response = await ApiEndpoints.getSurveyStatus(requestId);
-      
-      if (response.status === 'COMPLETED' && response.pages) {
-        const pages = Array.isArray(response.pages) ? response.pages : [];
-        
-        const allQuestions: any[] = [];
-        pages.forEach((page: any) => {
-          const elements = page.elements || [];
-          
-          elements.forEach((element: any, elemIndex: number) => {
-            allQuestions.push({
-              id: element.surveyQID || element.name || `q-${Date.now()}-${elemIndex}`,
-              type: mapQuestionType(element.type),
-              title: stripHtmlTags(element.title || ''),
-              description: element.description || '',
-              required: element.isRequired || false,
-              choices: mapChoices(element),
-            });
-          });
-        });
-        
-        const consolidatedPages = [{
-          id: 'page1',
-          name: 'page1',
-          title: 'Survey Questions',
-          questions: allQuestions,
-        }];
-        
-        const survey: Survey = {
-          id: requestId,
-          title: formData.projectName || 'Draft Survey',
-          description: localOverview || 'Survey Description',
-          pages: consolidatedPages,
-          settings: {
-            showProgressBar: true,
-            showQuestionNumbers: true,
-            allowBack: true,
-            completeText: 'Submit Survey',
-          },
-        };
-        
-        setCurrentSurvey(survey);
-        
-        if (response.doc_link) {
-          setCurrentSurveyDocLink(response.doc_link);
-        }
-        
-        const totalQuestions = survey.pages.reduce((acc, p) => acc + p.questions.length, 0);
-        addNotification({
-          type: 'success',
-          title: 'Survey Loaded',
-          message: `${totalQuestions} questions loaded successfully.`,
-        });
-        
-        // Auto-navigate to builder on completion
-        navigate('/builder');
+  // ── Completion / failure handlers ─────────────────────────────────────────────
 
-      }
-    } catch (error: any) {
-      console.error('Failed to fetch survey:', error);
-      addNotification({
-        type: 'error',
-        title: 'Load Failed',
-        message: 'Failed to load generated survey data.',
-      });
-    }
-  };
-
-  const mapQuestionType = (backendType: string): 'multiple-choice' | 'text' | 'matrix' | 'video' => {
-    switch (backendType) {
-      case 'radiogroup':
-      case 'checkbox':
-        return 'multiple-choice';
-      case 'comment':
-        return 'text';
-      case 'matrix':
-        return 'matrix';
-      case 'videofeedback':
-        return 'video';
-      default:
-        return 'text';
-    }
-  };
-
-  const stripHtmlTags = (html: string): string => {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || '';
-  };
-
-  const mapChoices = (element: any): Choice[] => {
-    if (element.choices && Array.isArray(element.choices)) {
-      return element.choices.map((choice: any, index: number) => ({
-        id: `choice-${index}`,
-        text: stripHtmlTags(choice.text || choice.value || choice),
-        value: choice.value || choice.text || choice,
-      }));
-    }
-    return [];
-  };
-
-  const generateUseCase = async () => {
-    if (!formData.projectName || !formData.companyName) {
-      addNotification({
-        type: 'error',
-        title: 'Missing Information',
-        message: 'Please provide Project Name and Company Name first.',
-      });
+  const handleCompletion = React.useCallback(async () => {
+    if (completionFiredRef.current) {
+      logger.debug('[create] handleCompletion called again — ignoring duplicate');
       return;
     }
+    completionFiredRef.current = true;
 
-    setIsGeneratingUseCase(true);
+    logger.debug('[create] generation complete — fetching survey data');
+
+    if (!requestId) return;
+
     try {
-      const data = await ApiEndpoints.generateUseCase({
-        project_name: formData.projectName,
-        company_name: formData.companyName,
-        industry: formData.industry,
-        existing_use_case: formData.useCase || '',
-        llm_model: formData.llmProvider || 'gpt',
-      });
-      setFormData((prev) => ({ ...prev, useCase: data.use_case }));
+      const data = await ApiEndpoints.getSurveyStatus(requestId);
+
+      if (data.status !== 'COMPLETED') {
+        logger.warn('[create] unexpected status after completion signal', data.status);
+        return;
+      }
+
+      // ── Build frontend Survey object from SurveyJS pages ──────────────────
+
+      const pages: any[] = Array.isArray(data.pages) ? data.pages : [];
+      const questions = pages.flatMap((page: any) =>
+        (page.elements ?? []).map((el: any, i: number) => ({
+          id: el.surveyQID ?? el.name ?? `q-${i}`,
+          type: mapType(el.type),
+          title: stripHtml(el.title ?? ''),
+          description: el.description ?? '',
+          required: el.isRequired ?? false,
+          choices: mapChoices(el),
+        }))
+      );
+
+      const survey: Survey = {
+        id: requestId,
+        title: projectName || 'Draft Survey',
+        description: businessOverviewText || '',
+        pages: [{ id: 'page1', name: 'page1', title: 'Questions', questions }],
+        settings: {
+          showProgressBar: true,
+          showQuestionNumbers: true,
+          allowBack: true,
+          completeText: 'Submit',
+        },
+      };
+
+      setCurrentSurvey(survey);
+      if (data.doc_link) setCurrentSurveyDocLink(data.doc_link);
+
       addNotification({
         type: 'success',
-        title: 'Use Case Generated',
-        message: 'AI has generated a use case description for your project.',
+        title: 'Survey ready',
+        message: `${questions.length} questions generated.`,
       });
-    } catch (error: any) {
+
+      navigate('/builder');
+    } catch (err: any) {
+      logger.error('[create] failed to fetch completed survey', err);
+      handleFailure(err?.detail ?? 'Failed to load generated survey');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [requestId, projectName, businessOverviewText]);
+
+  const handleFailure = React.useCallback(
+    (reason: string) => {
+      logger.warn('[create] generation failed:', reason);
+      setIsGenerating(false);
+      setError(reason);
       addNotification({
         type: 'error',
-        title: 'Generation Failed',
-        message: error.detail || error.message || 'Failed to generate use case. Please try again.',
+        title: 'Generation failed',
+        message: reason,
       });
-    } finally {
-      setIsGeneratingUseCase(false);
-    }
+    },
+    [setIsGenerating, setError, addNotification]
+  );
+
+  // ── Form validation ───────────────────────────────────────────────────────────
+
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!projectName.trim()) errs.projectName = 'Project name is required';
+    if (!companyName.trim()) errs.companyName = 'Company name is required';
+    if (!useCase.trim()) errs.useCase = 'Use case is required';
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
   };
+
+  // ── Generate business overview via AI ─────────────────────────────────────────
 
   const generateOverview = async () => {
-    if (!formData.projectName || !formData.companyName) {
-      addNotification({
-        type: 'error',
-        title: 'Missing Information',
-        message: 'Please provide Project Name and Company Name first.',
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
+    if (!companyName.trim()) return;
+    setIsAiThinking(true);
     try {
-      const response = await ApiEndpoints.generateBusinessOverview({
-        request_id: Math.random().toString(36).substring(7),
-        project_name: formData.projectName,
-        company_name: formData.companyName,
-        industry: formData.industry,
-        use_case: formData.useCase,
-        llm_model: formData.llmProvider || 'gpt',
+      const data = await ApiEndpoints.getBusinessOverview({
+        company_name: companyName,
+        raw_input: useCase || companyName,
+        llm_model: llmModel,
       });
-      
-      const newOverview = response.business_overview;
-      setLocalOverview(newOverview);
-      setBusinessOverview(newOverview);
+      setBusinessOverviewText(data.business_overview ?? '');
       setShowOverview(true);
-      addNotification({
-        type: 'success',
-        title: 'Overview Generated',
-        message: 'Successfully generated business overview.',
-      });
     } catch (err: any) {
-      setError(err.detail || 'Failed to generate overview');
-      addNotification({
-        type: 'error',
-        title: 'Generation Failed',
-        message: err.detail || 'There was an error communicating with the API.',
-      });
+      addNotification({ type: 'error', title: 'AI error', message: err?.detail ?? 'Failed to generate overview' });
     } finally {
-      setIsLoading(false);
+      setIsAiThinking(false);
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: undefined as any }));
-    }
-  };
+  // ── Form submit — triggers generation pipeline ────────────────────────────────
 
-  const startSurveyGeneration = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validate form
-    const validationErrors = validateProjectSetup(formData);
-    
-    if (validationErrors.length > 0) {
-      const newErrors: Record<string, string> = {};
-      validationErrors.forEach((err) => {
-        if (err.field) {
-          newErrors[err.field] = err.message;
-        }
-      });
-      setErrors(newErrors);
-      addNotification({
-        type: 'error',
-        title: 'Validation Error',
-        message: 'Please check the form for errors.',
-      });
-      return;
-    }
-    
-    setCurrentProject(formData);
-    setBusinessOverview(localOverview);
+    if (!validate()) return;
+
+    const reqId = `req-${Date.now()}`;
+    setRequestId(reqId);
+    completionFiredRef.current = false;
+
+    setCurrentProject({ projectName, companyName, industry, useCase, llmProvider: llmModel });
+    setBusinessOverview(businessOverviewText);
     setIsGenerating(true);
-    setProgressLog([{ time: new Date().toLocaleTimeString(), message: 'Starting API request...' }]);
-    const newReqId = `req-${Date.now()}`;
-    setRequestId(newReqId);
+    setProgressLog([{ time: new Date().toLocaleTimeString(), msg: 'Starting survey generation…' }]);
 
     try {
       await ApiEndpoints.generateSurvey({
-        request_id: newReqId,
-        project_name: formData.projectName,
-        company_name: formData.companyName,
-        industry: formData.industry,
-        use_case: formData.useCase,
-        business_overview: localOverview,
-        research_objectives: 'Generate standard research objectives.',
-        llm_model: formData.llmProvider || 'gpt',
-        use_web_search: formData.useWebSearch
+        request_id: reqId,
+        project_name: projectName,
+        company_name: companyName,
+        business_overview: businessOverviewText,
+        research_objectives: '',
+        industry,
+        use_case: useCase,
+        llm_model: llmModel,
+        use_web_search: useWebSearch,
       });
-      setProgressLog(prev => [...prev, { time: new Date().toLocaleTimeString(), message: 'Survey generation triggered successfully. Awaiting updates...' }]);
+
+      // Connect WebSocket after confirming the task was accepted
+      wsConnect(reqId);
+      appendLog('Generation started — listening for updates…');
     } catch (err: any) {
-      setIsGenerating(false);
-      setError(err.detail || 'Generation failed');
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.detail || 'Failed to start survey generation.'
-      });
+      handleFailure(err?.detail ?? 'Failed to start generation');
     }
   };
 
-  const logsEndRef = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [progressLog]);
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <div className="bg-white shadow sm:rounded-lg">
-        <div className="px-4 py-5 sm:p-6 bg-gray-50 border-b border-gray-200">
-          <h3 className="text-2xl font-bold text-gray-900">Create New Survey</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Fill in the details below to generate your survey with AI
-          </p>
+    <div className="max-w-3xl mx-auto py-8">
+      <div className="bg-white shadow rounded-lg">
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-gray-200 bg-gray-50">
+          <h2 className="text-2xl font-bold text-gray-900">Create New Survey</h2>
+          <p className="mt-1 text-sm text-gray-500">Fill in the details below to generate your survey with AI.</p>
         </div>
 
-        <form onSubmit={startSurveyGeneration} className="px-4 py-5 sm:p-6">
-          <div className="space-y-6">
-            {/* Project Details Section */}
-            <div className="space-y-6">
-              <FormField label="Project Name" error={errors.projectName}>
-                <Input
-                  name="projectName"
-                  value={formData.projectName}
-                  onChange={handleChange}
-                  placeholder="e.g. Employee Satisfaction 2024"
-                  disabled={isGenerating}
-                />
-              </FormField>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-6">
+          {/* Project Name */}
+          <FormField label="Project Name" error={formErrors.projectName}>
+            <Input
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="e.g. Customer Satisfaction 2024"
+              disabled={isGenerating}
+            />
+          </FormField>
 
-              <FormField label="Company Name" error={errors.companyName}>
-                <Input
-                  name="companyName"
-                  value={formData.companyName}
-                  onChange={handleChange}
-                  placeholder="e.g. Acme Corp"
-                  disabled={isGenerating}
-                />
-              </FormField>
+          {/* Company Name */}
+          <FormField label="Company Name" error={formErrors.companyName}>
+            <Input
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="e.g. Acme Corp"
+              disabled={isGenerating}
+            />
+          </FormField>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField label="Industry" error={errors.industry}>
-                  <Select
-                    name="industry"
-                    value={formData.industry}
-                    onChange={handleChange}
-                    disabled={isGenerating}
-                    options={[
-                      { value: 'technology', label: 'Technology' },
-                      { value: 'healthcare', label: 'Healthcare' },
-                      { value: 'finance', label: 'Finance & Banking' },
-                      { value: 'education', label: 'Education' },
-                      { value: 'retail', label: 'Retail & E-commerce' },
-                      { value: 'manufacturing', label: 'Manufacturing' },
-                      { value: 'hospitality', label: 'Hospitality & Tourism' },
-                      { value: 'real-estate', label: 'Real Estate' },
-                      { value: 'automotive', label: 'Automotive' },
-                      { value: 'telecommunications', label: 'Telecommunications' },
-                      { value: 'media', label: 'Media & Entertainment' },
-                      { value: 'energy', label: 'Energy & Utilities' },
-                      { value: 'transportation', label: 'Transportation & Logistics' },
-                      { value: 'agriculture', label: 'Agriculture' },
-                      { value: 'construction', label: 'Construction' },
-                      { value: 'pharmaceutical', label: 'Pharmaceutical' },
-                      { value: 'insurance', label: 'Insurance' },
-                      { value: 'legal', label: 'Legal Services' },
-                      { value: 'consulting', label: 'Consulting' },
-                      { value: 'non-profit', label: 'Non-Profit' },
-                      { value: 'government', label: 'Government' },
-                      { value: 'other', label: 'Other' },
-                    ]}
-                  />
-                </FormField>
+          {/* Industry + AI Model row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Industry">
+              <Select
+                value={industry}
+                onChange={(e) => setIndustry(e.target.value)}
+                disabled={isGenerating}
+                options={INDUSTRIES.map((v) => ({
+                  value: v,
+                  label: v.charAt(0).toUpperCase() + v.slice(1).replace('-', ' '),
+                }))}
+              />
+            </FormField>
+            <FormField label="AI Provider">
+              <Select
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value as 'gpt' | 'gemini')}
+                disabled={isGenerating}
+                options={[
+                  { value: 'gpt',    label: 'OpenAI GPT' },
+                  { value: 'gemini', label: 'Google Gemini' },
+                ]}
+              />
+            </FormField>
+          </div>
 
-                <FormField label="AI Provider" error={errors.llmProvider}>
-                  <Select
-                    name="llmProvider"
-                    value={formData.llmProvider}
-                    onChange={handleChange}
-                    disabled={isGenerating}
-                    options={[
-                      { value: 'gpt', label: 'OpenAI GPT' },
-                      { value: 'gemini', label: 'Google Gemini' },
-                    ]}
-                  />
-                </FormField>
+          {/* Use Case */}
+          <FormField label="Use Case / Research Goal" error={formErrors.useCase}>
+            <Textarea
+              value={useCase}
+              onChange={(e) => setUseCase(e.target.value)}
+              placeholder="Describe what you want to learn from this survey…"
+              rows={4}
+              disabled={isGenerating}
+            />
+          </FormField>
+
+          {/* Web search toggle */}
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useWebSearch}
+              onChange={(e) => setUseWebSearch(e.target.checked)}
+              disabled={isGenerating}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-gray-700">
+              Enable web-search intelligence (fetches latest industry trends)
+            </span>
+          </label>
+
+          {/* Business Overview — collapsible */}
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Business Overview</p>
+                <p className="text-xs text-gray-500">Optional — extra context for better questions</p>
               </div>
-
-              <FormField label="Use Case" error={errors.useCase}>
-                <div className="space-y-2">
-                  <Textarea
-                    name="useCase"
-                    value={formData.useCase}
-                    onChange={handleChange}
-                    placeholder="Describe what you want to achieve with this survey..."
-                    rows={5}
-                    disabled={isGenerating}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={generateUseCase}
-                    disabled={isGeneratingUseCase || !formData.projectName || !formData.companyName || isGenerating}
-                  >
-                    {isGeneratingUseCase ? 'Generating...' : '✨ Generate Use Case with AI'}
-                  </Button>
-                </div>
-              </FormField>
-              
-              <div className="flex items-center space-x-3 pt-2">
-                <input
-                  type="checkbox"
-                  id="useWebSearch"
-                  name="useWebSearch"
-                  checked={formData.useWebSearch}
-                  onChange={(e) => setFormData(prev => ({ ...prev, useWebSearch: e.target.checked }))}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  disabled={isGenerating}
-                />
-                <label htmlFor="useWebSearch" className="text-sm font-medium text-gray-700">
-                  Enable Web Search Intelligence (Fetches latest industry trends via DuckDuckGo)
-                </label>
-              </div>
-            </div>
-
-            {/* Business Overview Section - Collapsible */}
-            <div className="pt-6 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h4 className="text-lg font-medium text-gray-900">Business Overview</h4>
-                  <p className="text-sm text-gray-500">Optional: Provide additional context about your business</p>
-                </div>
+              <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowOverview(!showOverview)}
-                  disabled={isGenerating}
+                  onClick={generateOverview}
+                  disabled={isGenerating || isAiThinking || !companyName.trim()}
                 >
-                  {showOverview ? 'Hide' : 'Show'} Overview
+                  {isAiThinking ? 'Generating…' : '✨ AI Generate'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowOverview((v) => !v)}
+                >
+                  {showOverview ? 'Hide' : 'Show'}
                 </Button>
               </div>
-
-              {showOverview && (
-                <div className="space-y-3">
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={generateOverview}
-                      variant="secondary"
-                      size="sm"
-                      disabled={isGenerating || !formData.projectName || !formData.companyName}
-                    >
-                      Generate Automatically via AI
-                    </Button>
-                  </div>
-                  
-                  <textarea
-                    className="w-full h-48 p-4 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    value={localOverview}
-                    onChange={(e) => setLocalOverview(e.target.value)}
-                    placeholder="Generate an overview or write your own contextual business details here..."
-                    disabled={isGenerating}
-                  />
-                </div>
-              )}
             </div>
+
+            {showOverview && (
+              <Textarea
+                value={businessOverviewText}
+                onChange={(e) => setBusinessOverviewText(e.target.value)}
+                placeholder="Generated overview will appear here, or write your own…"
+                rows={5}
+                disabled={isGenerating}
+              />
+            )}
           </div>
 
-          <div className="flex justify-end gap-4 pt-6 mt-6 border-t border-gray-200">
+          {/* Action buttons */}
+          <div className="flex justify-end gap-3 pt-4 border-t">
             <Button type="button" variant="outline" onClick={() => navigate('/')} disabled={isGenerating}>
               Cancel
             </Button>
             <Button type="submit" disabled={isGenerating}>
-              Generate Survey
+              {isGenerating ? 'Generating…' : 'Generate Survey'}
             </Button>
           </div>
         </form>
       </div>
 
-      <Modal 
-        isOpen={isGenerating || progressLog.length > 0} 
-        onClose={() => {}} 
-        title="Generating Survey"
+      {/* Generation progress modal */}
+      <Modal
+        isOpen={isGenerating}
+        onClose={() => {}}
+        title="Generating Your Survey"
       >
-        <div className="flex flex-col space-y-4">
-          <p className="text-sm text-gray-600">
-            Please wait while we generate your survey using AI. This may take a few seconds.
-          </p>
-
-          <div className="bg-gray-900 rounded-lg p-4 text-left h-48 overflow-y-auto font-mono text-sm shadow-inner relative">
-            {!isConnected && isGenerating && (
-              <p className="text-yellow-400 opacity-80 mb-2 text-xs">WebSocket disconnected. Falling back to polling.</p>
-            )}
-
-            <div className="space-y-1">
-              {progressLog.map((log, index) => {
-                return (
-                  <div key={index} className="text-green-400 break-words flex items-start">
-                    <span className="text-gray-500 mr-2 flex-shrink-0">[{log.time}]</span>
-                    <span>{log.message}</span>
-                  </div>
-                );
-              })}
-              <div ref={logsEndRef} />
-            </div>
+        <div className="space-y-4">
+          {/* WS status badge */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600">
+              This may take up to a minute — please don't close this window.
+            </p>
+            <WsBadge status={wsStatus} hasFailed={hasFailed} />
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <div className="flex items-center space-x-2">
-              {isGenerating ? (
-                <>
-                  <Spinner size="sm" className="text-blue-500" />
-                  <span className="text-sm text-gray-500">Processing...</span>
-                </>
-              ) : (
-                <span className="text-sm text-green-600 font-medium">Generation complete!</span>
-              )}
-            </div>
-            
-            {!isGenerating && progressLog.length > 0 && (
-              <Button size="sm" onClick={() => navigate('/builder')}>
-                Continue to Editor
-              </Button>
-            )}
+          {/* Log console */}
+          <div className="bg-gray-900 rounded-lg p-4 h-44 overflow-y-auto font-mono text-xs">
+            {progressLog.map((entry, i) => (
+              <div key={i} className="flex gap-2 text-green-400 break-words">
+                <span className="text-gray-500 flex-shrink-0">[{entry.time}]</span>
+                <span>{entry.msg}</span>
+              </div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
+
+          {/* Spinner row */}
+          <div className="flex items-center gap-2">
+            <Spinner size="sm" />
+            <span className="text-sm text-gray-500">AI is crafting your questions…</span>
           </div>
         </div>
       </Modal>
     </div>
   );
 };
+
+// ── Utility helpers ────────────────────────────────────────────────────────────
+
+function stripHtml(html: string): string {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return d.textContent ?? d.innerText ?? '';
+}
+
+function mapType(t: string): 'multiple-choice' | 'text' | 'matrix' | 'video' {
+  if (t === 'radiogroup' || t === 'checkbox') return 'multiple-choice';
+  if (t === 'comment')                         return 'text';
+  if (t === 'matrix')                          return 'matrix';
+  if (t === 'videofeedback')                   return 'video';
+  return 'text';
+}
+
+function mapChoices(el: any): Choice[] {
+  if (!Array.isArray(el.choices)) return [];
+  return el.choices.map((c: any, i: number) => ({
+    id:    `c-${i}`,
+    text:  stripHtml(typeof c === 'string' ? c : c.text ?? c.value ?? ''),
+    value: typeof c === 'string' ? c : c.value ?? c.text ?? '',
+  }));
+}
