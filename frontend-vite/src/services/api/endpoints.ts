@@ -1,117 +1,123 @@
+/**
+ * API endpoints — typed wrappers around httpService.
+ *
+ * Phase 2 addition: refreshTokens() for the silent refresh interceptor.
+ */
 import { httpService } from './httpService';
-// Temporary: Import debug version for troubleshooting
-// import { httpServiceDebug as httpService } from './httpService.debug';
-import type {
-  LoginCredentials,
-  RegisterData,
-  AuthTokens,
-} from '@/types/auth';
-import type {
-  BusinessOverviewRequest,
-  BusinessOverviewResponse,
-  ResearchObjectiveRequest,
-  SurveyGenerationRequest,
-  SurveyStatusResponse,
-  RegenerateSurveyDocRequest,
-  RegenerateSurveyDocResponse,
-} from '@/types/survey';
+import type { AuthTokens, LoginCredentials, RegisterData } from '@/types/auth';
+import { logger } from '@/utils/logger';
 
 export class ApiEndpoints {
-  // Authentication endpoints
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
   static async login(credentials: LoginCredentials): Promise<AuthTokens> {
-    console.log('🔐 [API] Login request:', credentials.username);
-    const result = await httpService.post<AuthTokens>('/api/v1/auth/login', credentials);
-    console.log('✅ [API] Login successful, token received');
-    return result;
+    logger.http('[endpoints] POST /auth/login');
+    const response = await httpService.post<AuthTokens>('/api/v1/auth/login', credentials);
+    return response.data;
   }
 
   static async register(data: RegisterData): Promise<AuthTokens> {
-    return httpService.post<AuthTokens>('/api/v1/auth/register', data);
+    logger.http('[endpoints] POST /auth/register');
+    const response = await httpService.post<AuthTokens>('/api/v1/auth/register', data);
+    return response.data;
   }
 
-  static async generateUseCase(data: {
+  /** Called only by the HTTP interceptor — use a bare axios call there to avoid loops. */
+  static async refreshTokens(refreshToken: string): Promise<AuthTokens> {
+    logger.http('[endpoints] POST /auth/refresh');
+    const response = await httpService.post<AuthTokens>('/api/v1/auth/refresh', {
+      refresh_token: refreshToken,
+    });
+    return response.data;
+  }
+
+  // ── Survey generation ─────────────────────────────────────────────────────
+
+  static async getBusinessOverview(payload: {
+    company_name: string;
+    raw_input: string;
+    llm_model?: string;
+  }) {
+    logger.http('[endpoints] POST /surveys/business-overview');
+    const response = await httpService.post('/api/v1/surveys/business-overview', payload);
+    return response.data;
+  }
+
+  static async generateUseCase(payload: {
+    company_name: string;
+    business_overview: string;
+    llm_model?: string;
+  }) {
+    logger.http('[endpoints] POST /surveys/generate-use-case');
+    const response = await httpService.post('/api/v1/surveys/generate-use-case', payload);
+    return response.data;
+  }
+
+  static async getResearchObjectives(payload: {
+    business_overview: string;
+    use_case: string;
+    llm_model?: string;
+  }) {
+    logger.http('[endpoints] POST /surveys/research-objectives');
+    const response = await httpService.post('/api/v1/surveys/research-objectives', payload);
+    return response.data;
+  }
+
+  static async generateSurvey(payload: {
+    request_id: string;
     project_name: string;
     company_name: string;
+    business_overview: string;
+    research_objectives: string;
     industry: string;
-    existing_use_case?: string;
+    use_case: string;
     llm_model?: string;
-  }): Promise<{ success: number; use_case: string }> {
-    return httpService.post('/api/v1/surveys/generate-use-case', data);
+    use_web_search?: boolean;
+  }) {
+    logger.http('[endpoints] POST /surveys/generate');
+    const response = await httpService.post('/api/v1/surveys/generate', payload);
+    return response.data;
   }
 
-  // Survey endpoints
-  static async generateBusinessOverview(request: BusinessOverviewRequest): Promise<BusinessOverviewResponse> {
-    console.log('📊 [API] Generating business overview...');
-    console.log('📊 [API] Request data:', request);
-    
-    // Check localStorage before making request
-    const authStore = localStorage.getItem('auth-store');
-    const authTokens = localStorage.getItem('auth-tokens');
-    console.log('📊 [API] auth-store exists:', !!authStore);
-    console.log('📊 [API] auth-tokens exists:', !!authTokens);
-    
-    if (authStore) {
-      const parsed = JSON.parse(authStore);
-      console.log('📊 [API] auth-store tokens:', parsed.state?.tokens ? 'Found' : 'Not found');
-    }
-    if (authTokens) {
-      const parsed = JSON.parse(authTokens);
-      console.log('📊 [API] auth-tokens:', parsed.accessToken ? 'Found' : 'Not found');
-    }
-    
-    const result = await httpService.post<BusinessOverviewResponse>('/api/v1/surveys/business-overview', request);
-    console.log('✅ [API] Business overview generated');
-    return result;
+  static async getSurveyStatus(requestId: string) {
+    logger.http('[endpoints] GET /surveys/status/' + requestId);
+    const response = await httpService.get(`/api/v1/surveys/status/${requestId}`);
+    return response.data;
   }
 
-  static async generateResearchObjectives(request: ResearchObjectiveRequest): Promise<any> {
-    return httpService.post('/api/v1/surveys/research-objectives', request);
+  static async listSurveys() {
+    logger.http('[endpoints] GET /surveys/');
+    const response = await httpService.get('/api/v1/surveys/');
+    return response.data;
   }
 
-  static async generateBusinessResearch(request: BusinessOverviewRequest): Promise<any> {
-    return httpService.post('/api/v1/surveys/business-research', request);
+  static async deleteSurvey(requestId: string) {
+    logger.http('[endpoints] DELETE /surveys/' + requestId);
+    const response = await httpService.delete(`/api/v1/surveys/${requestId}`);
+    return response.data;
   }
 
-  static async generateSurvey(request: SurveyGenerationRequest): Promise<SurveyStatusResponse> {
-    return httpService.post<SurveyStatusResponse>('/api/v1/surveys/generate', request);
+  static async regenerateDocument(payload: {
+    request_id: string;
+    project_name: string;
+  }) {
+    logger.http('[endpoints] POST /surveys/regenerate-document');
+    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
+    return response.data;
   }
 
-  static async getSurveyStatus(requestId: string): Promise<SurveyStatusResponse> {
-    return httpService.get<SurveyStatusResponse>(`/api/v1/surveys/status/${requestId}`);
+  static async getSettings() {
+    const response = await httpService.get('/api/v1/surveys/settings');
+    return response.data;
   }
 
-  static async getUserSurveys(): Promise<{ success: number; surveys: any[] }> {
-    return httpService.get('/api/v1/surveys/');
-  }
+  // ── File downloads ────────────────────────────────────────────────────────
 
-  static async deleteSurvey(requestId: string): Promise<{ success: number; message: string }> {
-    return httpService.delete(`/api/v1/surveys/${requestId}`);
-  }
-
-  static async regenerateSurveyDocument(request: RegenerateSurveyDocRequest): Promise<RegenerateSurveyDocResponse> {
-    return httpService.post<RegenerateSurveyDocResponse>('/api/v1/surveys/regenerate-document', request);
-  }
-
-  static async updateSurveySettings(requestId: string, settings: any): Promise<{ success: number; settings: any }> {
-    return httpService.post('/api/v1/surveys/settings', { request_id: requestId, settings });
-  }
-
-  // File endpoints
-  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
-    console.log('📥 [API] Downloading file from URL:', url);
-    return httpService.downloadFile(url, filename);
-  }
-
-  static async downloadSurveyDocument(filename: string): Promise<void> {
-    return httpService.downloadFile(`/api/v1/files/download/${filename}`, filename);
-  }
-
-  static async uploadFile(file: File, onProgress?: (progress: number) => void): Promise<any> {
-    return httpService.uploadFile('/api/v1/files/upload', file, onProgress);
-  }
-
-  // Health check endpoint
-  static async healthCheck(): Promise<{ status: string; timestamp: string }> {
-    return httpService.get('/api/v1/health');
+  static async downloadFile(filename: string): Promise<Blob> {
+    logger.http('[endpoints] GET /files/download/' + filename);
+    const response = await httpService.get(`/api/v1/files/download/${filename}`, {
+      responseType: 'blob',
+    });
+    return response.data;
   }
 }
