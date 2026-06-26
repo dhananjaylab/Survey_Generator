@@ -1,11 +1,22 @@
-// Authentication Type Definitions
-// This file contains all authentication-related TypeScript interfaces and types
+/**
+ * Authentication types — matches backend TokenResponse exactly (snake_case).
+ *
+ * Phase 1 fix: access_token is snake_case throughout (was accessToken in useAuth.ts).
+ * Phase 2 addition: refresh_token field added.
+ */
+
+export interface AuthTokens {
+  /** Short-lived JWT — 1 hour. Include as `Authorization: Bearer <token>`. */
+  access_token: string;
+  /** Long-lived JWT — 72 hours. Exchange for a new pair via /auth/refresh. */
+  refresh_token: string;
+  token_type: string;
+}
 
 export interface User {
   username: string;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
+  email?: string;
+  is_active: boolean;
 }
 
 export interface LoginCredentials {
@@ -18,15 +29,15 @@ export interface RegisterData {
   password: string;
 }
 
-export interface AuthTokens {
-  access_token: string;  // Backend uses snake_case
-  token_type: string;
-}
-
 export interface AuthState {
-  user: User | null;
   tokens: AuthTokens | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+
+  login: (credentials: LoginCredentials) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
+  logout: () => void;
+  setTokens: (tokens: AuthTokens) => void;
+  clearError: () => void;
 }
