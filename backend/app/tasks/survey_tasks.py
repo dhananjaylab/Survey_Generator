@@ -4,8 +4,8 @@ Celery tasks for asynchronous survey generation.
 Key changes from original:
   1. Removed autoretry_for / retry_backoff decorator args — manual self.retry()
      is the sole retry mechanism to prevent double-firing.
-  2. R2 upload failure now falls back to local disk instead of silently
-     marking the survey COMPLETED with a broken download link.
+  2. Document export stays off local disk; uploads go to R2 first and the
+     app only persists a link once a usable R2-backed URL is available.
   3. Survey is only marked COMPLETED after a usable doc_link is confirmed.
 """
 import json
@@ -354,5 +354,8 @@ def generate_survey_task(
             error=str(exc),
         )
         raise
+
+
+
 
 
