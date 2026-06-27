@@ -1,495 +1,362 @@
-import asyncio
-import time
-from typing import List, Dict, Any, Optional
-from openai import AsyncOpenAI
-from google import genai
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
-import logging
-import redis.asyncio as aioredis
+"""
+AI Service — wraps OpenAI GPT and Google Gemini for survey generation.
+
+Phase 2 changes:
+  - Accepts an injected `redis` connection (shared pool from app.state.redis).
+    initialize() / close() become no-ops when redis is injected.
+  - Circuit breaker via @circuit on _call_llm_impl to prevent worker exhaustion
+    during AI provider outages.
+"""
 import json
-import hashlib
-from duckduckgo_search import DDGS
+import asyncio
+from typing import Any, Optional
+
+import httpx
 
 from app.core.config import settings
-from app.utils.prompts import PromptTemplates
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# ── Circuit breaker (install: pip install circuitbreaker) ────────────────────
+try:
+    from circuitbreaker import circuit, CircuitBreakerError
+    _CB_AVAILABLE = True
+except ImportError:
+    logger.warning("circuitbreaker_not_installed", hint="pip install circuitbreaker")
+    _CB_AVAILABLE = False
+
+    # Stub so the decorator is harmless when library is absent
+    def circuit(*args, **kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
+
+    class CircuitBreakerError(Exception):
+        pass
 
 
 class AIService:
-    """Service for AI-powered content generation with caching and retry logic.
-    Supports both OpenAI (GPT) and Google Gemini models.
-    Uses the latest google-genai SDK for Gemini integration.
-    """
-    
-    def __init__(self, llm_model: str = "gpt"):
-        """Initialize AI service with chosen model.
-        
-        Args:
-            llm_model: Either 'gpt' (OpenAI) or 'gemini' (Google Gemini)
+    def __init__(self, llm_model: str = "gpt", redis=None):
         """
-        self.llm_model = llm_model.lower()
-        if self.llm_model not in ["gpt", "gemini"]:
-            logger.warning(f"Unknown model {llm_model}, defaulting to gpt")
-            self.llm_model = "gpt"
-        
+        Args:
+            llm_model: 'gpt' or 'gemini'
+            redis:     Optional pre-created aioredis connection (shared pool).
+                       When provided, initialize() / close() are no-ops.
+        """
+        self.llm_model = llm_model
+        self._redis_injected = redis is not None
+        self._redis = redis
+        self._openai_client = None
+        self._openai_http_client = None
+        self._gemini_client = None
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def initialize(self) -> None:
+        """Connect AI provider clients and (if not injected) Redis cache."""
+        if not self._redis_injected and self._redis is None:
+            try:
+                import redis.asyncio as aioredis
+                self._redis = await aioredis.from_url(
+                    settings.REDIS_URL, decode_responses=True
+                )
+            except Exception as exc:
+                logger.warning("redis_cache_unavailable", error=str(exc))
+                self._redis = None
+
         if self.llm_model == "gpt":
-            self.client = AsyncOpenAI(
+            from openai import AsyncOpenAI
+            self._openai_http_client = httpx.AsyncClient(timeout=60, trust_env=False)
+            self._openai_client = AsyncOpenAI(
                 api_key=settings.OPENAI_API_KEY,
                 timeout=60,
-                max_retries=3
+                max_retries=3,
+                http_client=self._openai_http_client,
             )
-        else:  # gemini - using latest google-genai SDK
-            self.gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-            self.gemini_model_name = settings.GEMINI_MODEL
-        
-        self.redis: Optional[aioredis.Redis] = None
-        self.prompt_templates = PromptTemplates()
-        
-    async def initialize(self):
-        """Initialize Redis connection"""
-        self.redis = await aioredis.from_url(
-            settings.REDIS_URL,
-            decode_responses=True
-        )
-        
-    async def close(self):
-        """Close Redis connection and API clients"""
-        if self.redis:
-            await self.redis.close()
-        
-        # Close Gemini client if it exists
-        if self.llm_model == "gemini" and hasattr(self, 'gemini_client'):
+        elif self.llm_model == "gemini":
+            from google import genai
+            self._gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+
+    async def close(self) -> None:
+        """Close connections that this instance owns."""
+        if not self._redis_injected and self._redis:
             try:
-                # The google-genai client has an aclose method
-                if hasattr(self.gemini_client, 'aclose'):
-                    await self.gemini_client.aclose()
-            except Exception as e:
-                logger.warning(f"Error closing Gemini client: {e}")
-        
-        # Close OpenAI client if it exists
-        if self.llm_model == "gpt" and hasattr(self, 'client'):
+                await self._redis.close()
+            except Exception:
+                pass
+            self._redis = None
+
+        if self._openai_client:
             try:
-                await self.client.close()
-            except Exception as e:
-                logger.warning(f"Error closing OpenAI client: {e}")
-    
-    def _generate_cache_key(self, prefix: str, **kwargs) -> str:
-        content = json.dumps(kwargs, sort_keys=True)
-        hash_digest = hashlib.md5(content.encode()).hexdigest()
-        return f"{prefix}:{hash_digest}"
-    
-    async def _get_cached(self, key: str) -> Optional[str]:
-        if self.redis:
-            try: return await self.redis.get(key)
-            except Exception as e: logger.warning(f"Cache get failed: {e}")
-        return None
-    
-    async def _set_cached(self, key: str, value: str, ttl: int = 3600):
-        if self.redis:
-            try: await self.redis.setex(key, ttl, value)
-            except Exception as e: logger.warning(f"Cache set failed: {e}")
-    
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((Exception,)),
-        reraise=True
-    )
-    async def _call_llm(self, messages: List[Dict[str, str]], temperature: float = None, max_tokens: int = None, force_json: bool = False) -> str:
-        """Call the configured LLM (OpenAI GPT or Google Gemini)."""
-        call_start = time.time()
+                await self._openai_client.close()
+            except Exception:
+                pass
+            self._openai_client = None
+
+        if self._openai_http_client:
+            try:
+                await self._openai_http_client.aclose()
+            except Exception:
+                pass
+            self._openai_http_client = None
+
+    # ── LLM call with circuit breaker ─────────────────────────────────────────
+
+    @circuit(failure_threshold=5, recovery_timeout=60, expected_exception=Exception)
+    async def _call_llm_guarded(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+        force_json: bool = False,
+    ) -> str:
+        return await self._call_llm_impl(messages, temperature, max_tokens, force_json)
+
+    async def _call_llm(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+        force_json: bool = False,
+    ) -> str:
         try:
-            if self.llm_model == "gpt":
-                model_name = settings.CHATGPT_MODEL
-                logger.info(f"LLM_CALL_START: Using {model_name} (OpenAI GPT)")
-                kwargs = {
-                    "model": model_name,
-                    "messages": messages,
-                    "temperature": temperature or 0.7,
-                    "max_tokens": max_tokens or 2000,
-                }
-                if force_json:
-                    kwargs["response_format"] = {"type": "json_object"}
-                    
-                response = await self.client.chat.completions.create(**kwargs)
-                result = response.choices[0].message.content.strip()
-                
-                elapsed = time.time() - call_start
-                logger.info(f"LLM_CALL_COMPLETE: {model_name} responded in {elapsed:.2f}s ({len(result)} chars)")
-                return result
-            else:  # gemini - using latest google-genai SDK
-                model_name = self.gemini_model_name
-                logger.info(f"LLM_CALL_START: Using {model_name} (Google Gemini)")
-                
-                # Convert OpenAI message format to Gemini content format
-                contents = []
-                for msg in messages:
-                    role = msg.get("role", "user")
-                    content = msg.get("content", "")
-                    
-                    # Map OpenAI roles to Gemini roles
-                    gemini_role = "user" if role != "assistant" else "model"
-                    
-                    contents.append({
-                        "role": gemini_role,
-                        "parts": [{"text": content}]
-                    })
-                config = {
-                    "temperature": temperature or 0.7,
-                    "max_output_tokens": max_tokens or 2000,
-                }
-                
-                # Turn off safety settings which were incorrectly truncating demographic questions
-                from google.genai import types
-                
-                if force_json:
-                    config["response_mime_type"] = "application/json"
+            return await self._call_llm_guarded(messages, temperature, max_tokens, force_json)
+        except CircuitBreakerError as exc:
+            logger.error("llm_circuit_open", model=self.llm_model)
+            raise Exception("AI provider temporarily unavailable — please try again shortly") from exc
 
-                # Call Gemini API using google-genai SDK
-                response = self.gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        **config,
-                        safety_settings=[
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                        ]
-                    )
-                )
-
-                result = response.text.strip()
-                
-                elapsed = time.time() - call_start
-                logger.info(f"LLM_CALL_COMPLETE: {model_name} responded in {elapsed:.2f}s ({len(result)} chars)")
-                return result
-        except Exception as e:
-            elapsed = time.time() - call_start
-            logger.error(f"LLM_CALL_FAILED: {self.llm_model} failed after {elapsed:.2f}s - {e}")
-            raise
-    
-    async def generate_business_overview(self, company_name: str, use_cache: bool = True) -> str:
-        cache_key = self._generate_cache_key("business_overview", company=company_name)
-        if use_cache:
-            cached = await self._get_cached(cache_key)
-            if cached: return cached
-        
-        messages = self.prompt_templates.get_business_overview_prompt(company_name)
-        result = await self._call_llm(messages=messages, temperature=settings.BusinessOverviewTemperature, max_tokens=settings.BusinessOverviewMaxToken)
-        
-        # Strip exact match prefix if the LLM output it natively
-        lower_result = result.lower().strip()
-        lower_company = company_name.lower().strip()
-        
-        if lower_result.startswith(f"{lower_company} is"):
-            overview = result
-        elif lower_result.startswith(lower_company):
-            # Sometimes it might just output "Amazon, a leading..."
-            overview = result
+    async def _call_llm_impl(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        force_json: bool,
+    ) -> str:
+        if self.llm_model == "gpt":
+            return await self._call_openai(messages, temperature, max_tokens, force_json)
+        elif self.llm_model == "gemini":
+            return await self._call_gemini(messages, temperature, max_tokens, force_json)
         else:
-            overview = f"{company_name} is {result}"
-            
-        await self._set_cached(cache_key, overview)
+            raise ValueError(f"Unknown llm_model: {self.llm_model}")
 
-        return overview
-    
-    async def generate_research_objectives(self, company_name, business_overview, industry, use_case, use_cache=True):
-        cache_key = self._generate_cache_key("research_objectives", company=company_name, overview=business_overview[:100], industry=industry, use_case=use_case)
-        if use_cache:
-            cached = await self._get_cached(cache_key)
-            if cached: return cached
-        
-        messages = self.prompt_templates.get_research_objectives_prompt(company_name, business_overview, industry, use_case)
-        result = await self._call_llm(messages=messages, temperature=settings.ResearchObjectivesTemperature, max_tokens=settings.ResearchObjectivesMaxToken)
-        
-        # Formatting markup logic
-        ros = result.split("<")
-        l = []
-        i = 0
-        for r in ros:
-            if ">" in r:
-                s = r.split(">")
-                if i == 0: s[0] = '<mark style="background-color: blanchedalmond;">' + s[0] + '</mark>'
-                elif i == 1: s[0] = '<mark style="background-color: aqua;">' + s[0] + '</mark>'
-                elif i == 2: s[0] = '<mark style="background-color: #90ee90;">' + s[0] + '</mark>'
-                t = "".join(s)
-                l.append(t)
-                i += 1
-            else:
-                l.append(r)
-        final_result = "".join(l)
-        
-        await self._set_cached(cache_key, final_result)
-        return final_result
-    
-    async def generate_questionnaire(self, company_name, business_overview, research_objectives):
-        messages = self.prompt_templates.get_survey_generator_prompt(company_name, business_overview, research_objectives)
-        result = await self._call_llm(messages=messages, max_tokens=settings.QuestionnaireV2MaxToken)
-        questions = [q.strip() for q in result.split('\n') if q.strip()]
-        return questions
-        
-    async def generate_extra_question(self, company_name, business_overview, research_objectives, existing_questions_string, idx, q_type):
-        messages = self.prompt_templates.get_matrix_oe_prompt(company_name, business_overview, research_objectives, existing_questions_string, f"{idx}. [{q_type}]")
-        result = await self._call_llm(messages=messages, max_tokens=settings.MatrixOEMaxToken)
-        return f"{idx}. [{q_type}] {result}"
+    # ── OpenAI ────────────────────────────────────────────────────────────────
 
-    async def generate_video_questions(self, company_name, business_overview, research_objectives):
-        messages = self.prompt_templates.get_video_question_prompt(company_name, business_overview, research_objectives)
-        result = await self._call_llm(messages=messages, max_tokens=settings.VideoQuestionMaxToken)
-        return [q.strip() for q in result.split("\n") if q.strip()]
+    async def _call_openai(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        force_json: bool,
+    ) -> str:
+        kwargs: dict[str, Any] = {
+            "model":       settings.CHATGPT_MODEL,
+            "messages":    messages,
+            "temperature": temperature,
+            "max_tokens":  max_tokens,
+        }
+        if force_json:
+            kwargs["response_format"] = {"type": "json_object"}
 
-    async def generate_question_choices(self, question: str, question_type: str, company_name: str, business_overview: str, research_objectives: str):
-        if question_type == "Matrix":
-            messages = self.prompt_templates.get_matrix_choices_prompt(question, company_name, business_overview, research_objectives)
-            result = await self._call_llm(messages=messages, max_tokens=settings.ChoicesMatrixMaxToken)
-            parts = result.split("Columns:")
-            if len(parts) == 2:
-                rows = [r.strip().replace("-", "", 1).strip() for r in parts[0].split("\n") if r.strip()]
-                columns = [c.strip().replace("-", "", 1).strip() for c in parts[1].split("\n") if c.strip()]
-                return {"choices": [rows, columns]}
-            return {"choices": [[],[]]}
-        elif question_type in ["Multiple Choice", "Multiple choice"]:
-            messages = self.prompt_templates.get_mcq_choices_prompt(question, company_name, business_overview, research_objectives)
-            result = await self._call_llm(messages=messages, max_tokens=settings.ChoicesMCQMaxToken)
-            choices = [c.strip().replace("-", "", 1).strip() for c in result.split("\n") if c.strip()]
-            return {"choices": choices}
-        else:
-            return {"choices": ["Open-ended text response"]}
-    
-    async def generate_batch_choices(self, questions: List[Dict[str, Any]], company_name: str, business_overview: str, research_objectives: str) -> List[Dict[str, Any]]:
-        tasks = []
-        for question in questions:
-            t = self.generate_question_choices(question["question"], question["type"], company_name, business_overview, research_objectives)
-            tasks.append(t)
-        
-        results = []
-        batch_size = 5
-        for i in range(0, len(tasks), batch_size):
-            batch = tasks[i:i + batch_size]
-            batch_results = await asyncio.gather(*batch, return_exceptions=True)
-            results.extend(batch_results)
-            if i + batch_size < len(tasks):
-                await asyncio.sleep(1)
-        
-        for i, question in enumerate(questions):
-            if isinstance(results[i], Exception):
-                logger.error(f"Failed to generate choices: {results[i]}")
-                question["choices"] = []
-            else:
-                question.update(results[i])
-        return questions
-    
-    async def generate_batch_choices_optimized(self, questions: List[Dict[str, Any]], company_name: str, business_overview: str, research_objectives: str) -> List[Dict[str, Any]]:
-        """Optimized batch choice generation - generates choices for 5-10 questions in a SINGLE LLM call instead of one per question."""
-        start_time = time.time()
-        
-        if not questions:
-            return questions
-        
-        # Group by type for efficient generation
-        mcq_questions = [q for q in questions if q["type"] in ["Multiple Choice", "Multiple choice"]]
-        matrix_questions = [q for q in questions if q["type"] == "Matrix"]
-        
-        logger.info(f"Optimized batch generation: {len(mcq_questions)} MCQ + {len(matrix_questions)} Matrix questions")
-        
-        # Generate MCQ choices all at once
-        if mcq_questions:
-            mcq_start = time.time()
-            logger.info(f"Generating {len(mcq_questions)} MCQ choices in 1 batch...")
-            mcq_prompt = f"""Generate answer choices for these {len(mcq_questions)} multiple choice questions.
-For each question, provide 3-4 relevant choices separated by "|"
+        response = await self._openai_client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content.strip()
 
-Company: {company_name}
-Context: {business_overview[:200]}
+    # ── Gemini ────────────────────────────────────────────────────────────────
 
-Questions:
-"""
-            for i, q in enumerate(mcq_questions, 1):
-                mcq_prompt += f"{i}. {q['question']}\n"
-            
-            mcq_prompt += "\nFormat: 1. choice1|choice2|choice3|choice4\n2. choice1|choice2|choice3\nETC"
-            
-            messages = [{"role": "user", "content": mcq_prompt}]
-            try:
-                result = await self._call_llm(messages=messages, temperature=0.6, max_tokens=800)
-                mcq_elapsed = time.time() - mcq_start
-                logger.info(f"MCQ batch generated ({mcq_elapsed:.2f}s): {len(result)} chars")
-                
-                lines = result.strip().split('\n')
-                for i, line in enumerate(lines):
-                    if i < len(mcq_questions) and '|' in line:
-                        choices = [c.strip().replace('- ', '').replace('* ', '').strip() for c in line.split('|') if c.strip()]
-                        mcq_questions[i]['choices'] = choices if choices else ['Yes', 'No']
-            except Exception as e:
-                mcq_elapsed = time.time() - mcq_start
-                logger.warning(f"Optimized MCQ generation failed after {mcq_elapsed:.2f}s: {e}, using fallback")
-                for q in mcq_questions:
-                    q['choices'] = ['Agree', 'Neutral', 'Disagree']
-        
-        # Generate Matrix choices all at once
-        if matrix_questions:
-            matrix_start = time.time()
-            logger.info(f"Generating {len(matrix_questions)} Matrix choices in 1 batch...")
-            matrix_prompt = f"""Generate row and column options for these {len(matrix_questions)} matrix/Likert scale questions.
-For each question, provide rows and columns separated by "---"
+    async def _call_gemini(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        force_json: bool,
+    ) -> str:
+        from google.genai import types
 
-Company: {company_name}
+        safety_off = [
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE,
+            ),
+        ]
 
-Questions:
-"""
-            for i, q in enumerate(matrix_questions, 1):
-                matrix_prompt += f"{i}. {q['question']}\n"
-            
-            matrix_prompt += "\nFormat for each question:\nRows: row1, row2, row3\nColumns: col1, col2, col3, col4\n---\n"
-            
-            messages = [{"role": "user", "content": matrix_prompt}]
-            try:
-                result = await self._call_llm(messages=messages, temperature=0.6, max_tokens=800)
-                matrix_elapsed = time.time() - matrix_start
-                logger.info(f"Matrix batch generated ({matrix_elapsed:.2f}s): {len(result)} chars")
-                logger.debug(f"Matrix response: {result[:200]}...")  # Log first 200 chars for debugging
-                
-                # Initialize all with defaults first
-                for q in matrix_questions:
-                    q['choices'] = [['Item 1', 'Item 2', 'Item 3'], ['Poor', 'Average', 'Good', 'Excellent']]
-                
-                sections = result.split('---')
-                parsed_count = 0
-                for i, section in enumerate(sections):
-                    if i < len(matrix_questions):
-                        if 'Rows:' in section and 'Columns:' in section:
-                            try:
-                                rows_part = section.split('Rows:')[1].split('Columns:')[0].strip()
-                                cols_part = section.split('Columns:')[1].strip()
-                                rows = [r.strip() for r in rows_part.split(',') if r.strip()]
-                                cols = [c.strip() for c in cols_part.split(',') if c.strip()]
-                                if rows and cols:
-                                    matrix_questions[i]['choices'] = [rows[:3], cols[:4]]
-                                    parsed_count += 1
-                            except Exception as parse_error:
-                                logger.warning(f"Failed to parse Matrix section {i}: {parse_error}")
-                
-                logger.info(f"Successfully parsed {parsed_count}/{len(matrix_questions)} Matrix questions")
-            except Exception as e:
-                matrix_elapsed = time.time() - matrix_start
-                logger.warning(f"Optimized Matrix generation failed after {matrix_elapsed:.2f}s: {e}, using defaults for all")
-                for q in matrix_questions:
-                    q['choices'] = [['Item 1', 'Item 2', 'Item 3'], ['Poor', 'Average', 'Good', 'Excellent']]
-        
-        # Add back open-ended and video questions (they don't need choices)
-        for q in questions:
-            if q["type"] not in ["Multiple Choice", "Multiple choice", "Matrix"]:
-                if "choices" not in q or not q["choices"]:
-                    q["choices"] = []
-        
-        total_elapsed = time.time() - start_time
-        logger.info(f"Optimized batch choice generation completed in {total_elapsed:.2f}s")
-        return questions
+        # Map OpenAI role format → Gemini contents format
+        contents = [
+            {
+                "role":  "user" if m["role"] != "assistant" else "model",
+                "parts": [{"text": m["content"]}],
+            }
+            for m in messages
+        ]
 
-    async def generate_survey_json(self, company_name: str, business_overview: str, research_objectives: str, use_web_search: bool = False) -> List[Dict[str, Any]]:
-        """Single-pass JSON generation of the entire survey."""
-        context = ""
-        if use_web_search:
-            try:
-                results = DDGS().text(f"{company_name} industry survey questions trends", max_results=3)
-                context = "\nWeb Search Insights:\n" + "\n".join([f"- {r['body']}" for r in results])
-                logger.info(f"Web search retrieved {len(results)} snippets.")
-            except Exception as e:
-                logger.warning(f"Web search failed: {e}")
+        cfg: dict[str, Any] = {
+            "temperature":      temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if force_json:
+            cfg["response_mime_type"] = "application/json"
 
-        # Construct a strict JSON prompt
-        prompt = f"""You are an expert market researcher at {company_name}.
-Your job is to create an online survey questionnaire for a research project.
+        response = self._gemini_client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(**cfg, safety_settings=safety_off),
+        )
+        return response.text.strip()
 
-BUSINESS OVERVIEW:
-{business_overview}
+    # ── Redis cache helpers ────────────────────────────────────────────────────
 
-RESEARCH OBJECTIVES:
-{research_objectives}
-{context}
+    async def _cache_get(self, key: str) -> Optional[str]:
+        if not self._redis:
+            return None
+        try:
+            return await self._redis.get(key)
+        except Exception:
+            return None
 
-INSTRUCTIONS:
-1. Develop a high-quality market research questionnaire with a mix of 'Multiple Choice', 'Open-ended', and 'Matrix' questions.
-2. Provide exactly 15 to 20 well-thought-out questions.
-3. Determine the required answer choices based on the question type.
-   - For 'Multiple Choice': Provide an array of string choices.
-   - For 'Open-ended': Provide an empty array for choices.
-   - For 'Matrix': Provide exactly an array of two arrays: [[row1, row2, ...], [col1, col2, ...]].
+    async def _cache_set(self, key: str, value: str, ttl: int = 3600) -> None:
+        if not self._redis:
+            return
+        try:
+            await self._redis.setex(key, ttl, value)
+        except Exception:
+            pass
 
-You MUST output your response as a valid JSON object matching this structure EXACTLY:
-{{
-  "questions": [
-    {{
-      "type": "Multiple Choice",
-      "question": "Which of the following do you use?",
-      "choices": ["Option 1", "Option 2", "Option 3"]
-    }},
-    {{
-      "type": "Matrix",
-      "question": "Rate the following attributes:",
-      "choices": [
-        ["Attribute A", "Attribute B"],
-        ["Poor", "Average", "Excellent"]
-      ]
-    }},
-    {{
-      "type": "Open-ended",
-      "question": "What is your main reason?",
-      "choices": []
-    }}
-  ]
-}}
-Do NOT wrap the JSON in Markdown formatting like ```json ... ```. Output raw JSON only."""
+    # ── Public generation methods ─────────────────────────────────────────────
 
-        messages = [{"role": "system", "content": "You are a helpful API that returns strictly valid JSON."}, {"role": "user", "content": prompt}]
-        
-        # Add internal retry loop for JSON generation
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                result_text = await self._call_llm(messages=messages, temperature=0.7 + (attempt * 0.1), max_tokens=6000, force_json=True)
-                
-                # Check if response was truncated abruptly
-                if not result_text.strip().endswith('}'):
-                    # Force append brackets to try rescuing minor truncation
-                    result_text += ']}'
-                
-                # Clean potential markdown wrapping
-                result_text = result_text.strip()
-                if result_text.startswith("```json"):
-                    result_text = result_text[7:]
-                if result_text.startswith("```"):
-                    result_text = result_text[3:]
-                if result_text.endswith("```"):
-                    result_text = result_text[:-3]
-                result_text = result_text.strip()
-                
-                # Use regex to find the outermost JSON block in case of garbage around it
-                import re
-                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-                if json_match:
-                    result_text = json_match.group(0)
-                
-                data = json.loads(result_text)
-                
-                # Validate schema loosely
-                if "questions" not in data or not isinstance(data["questions"], list):
-                    raise ValueError("JSON response missing 'questions' array")
-                    
-                return data["questions"]
-                
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}\nResponse excerpt: {result_text[:500]}...")
-                if attempt == max_attempts - 1:
-                    logger.error("All internal retries for JSON generation failed.")
-                    raise ValueError("The AI model returned invalid JSON structure after multiple attempts.")
-                # Wait briefly before retrying
-                await asyncio.sleep(2)
+    async def generate_business_overview(
+        self,
+        company_name: str,
+        raw_input: str,
+    ) -> str:
+        cache_key = f"biz_overview:{self.llm_model}:{hash(company_name + raw_input)}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            logger.info("cache_hit", cache_key=cache_key[:40])
+            return cached
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a business analyst. Produce a concise, professional "
+                    "business overview based on the provided information."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Company: {company_name}\n\nContext: {raw_input}",
+            },
+        ]
+        result = await self._call_llm(messages, temperature=0.5)
+        await self._cache_set(cache_key, result)
+        return result
+
+    async def generate_use_case(
+        self,
+        company_name: str,
+        business_overview: str,
+    ) -> str:
+        cache_key = f"use_case:{self.llm_model}:{hash(company_name + business_overview)}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            logger.info("cache_hit", cache_key=cache_key[:40])
+            return cached
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a market research strategist. Write a short, clear "
+                    "research use case or research goal for a survey. Keep it to "
+                    "one concise paragraph and make it specific to the company."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Company: {company_name}\n\n"
+                    f"Business overview:\n{business_overview}\n\n"
+                    "Draft a research use case that explains what this survey should "
+                    "help the company learn."
+                ),
+            },
+        ]
+        result = await self._call_llm(messages, temperature=0.5)
+        await self._cache_set(cache_key, result)
+        return result
+
+    async def generate_research_objectives(
+        self,
+        business_overview: str,
+        use_case: str,
+    ) -> str:
+        cache_key = f"research_obj:{self.llm_model}:{hash(business_overview + use_case)}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            logger.info("cache_hit", cache_key=cache_key[:40])
+            return cached
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a market research expert. Generate clear, measurable "
+                    "research objectives for a survey based on the business context."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Business overview:\n{business_overview}\n\n"
+                    f"Use case:\n{use_case}"
+                ),
+            },
+        ]
+        result = await self._call_llm(messages, temperature=0.6)
+        await self._cache_set(cache_key, result)
+        return result
+
+    async def generate_survey_questions(
+        self,
+        company_name: str,
+        business_overview: str,
+        research_objectives: str,
+        use_web_search: bool = False,
+    ) -> str:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional survey designer. Generate a comprehensive "
+                    "survey questionnaire in JSON format. Return ONLY valid JSON with "
+                    "this structure: {\"questions\": [{\"text\": \"...\", \"type\": "
+                    "\"radiogroup\", \"choices\": [\"...\", \"...\"]}]}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Company: {company_name}\n\n"
+                    f"Business Overview:\n{business_overview}\n\n"
+                    f"Research Objectives:\n{research_objectives}\n\n"
+                    "Generate 15-20 survey questions with 4-5 choices each."
+                ),
+            },
+        ]
+        return await self._call_llm(
+            messages,
+            temperature=0.7,
+            max_tokens=4000,
+            force_json=True,
+        )

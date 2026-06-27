@@ -8,7 +8,7 @@ export const NotificationContainer: React.FC = () => {
 
   // Auto-dismiss notifications after their specified duration (default 5 seconds)
   React.useEffect(() => {
-    const timers = new Map<string, NodeJS.Timeout>();
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
     notifications.forEach((notification) => {
       // Skip if timer already exists for this notification

@@ -83,7 +83,10 @@ export const RegisterPage: React.FC = () => {
                 </svg>
               </div>
               <div className="ml-3 space-y-1">
-                {error && <p className="text-sm text-red-700">{error}</p>}
+                {/* Show API/server errors only when there are no client-side validation errors */}
+                {error && validationErrors.length === 0 && (
+                  <p className="text-sm text-red-700">{error}</p>
+                )}
                 {validationErrors.map((err, i) => (
                   <p key={i} className="text-sm text-red-700">{err}</p>
                 ))}
@@ -118,6 +121,22 @@ export const RegisterPage: React.FC = () => {
                 placeholder="Create a password"
                 disabled={isLoading}
               />
+              {password.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs">
+                  <li className={password.length >= 8 ? 'text-green-600' : 'text-gray-400'}>
+                    {password.length >= 8 ? '✓' : '○'} At least 8 characters
+                  </li>
+                  <li className={/[A-Z]/.test(password) ? 'text-green-600' : 'text-gray-400'}>
+                    {/[A-Z]/.test(password) ? '✓' : '○'} At least one uppercase letter
+                  </li>
+                  <li className={/[a-z]/.test(password) ? 'text-green-600' : 'text-gray-400'}>
+                    {/[a-z]/.test(password) ? '✓' : '○'} At least one lowercase letter
+                  </li>
+                  <li className={/\d/.test(password) ? 'text-green-600' : 'text-gray-400'}>
+                    {/\d/.test(password) ? '✓' : '○'} At least one number
+                  </li>
+                </ul>
+              )}
             </FormField>
 
             <FormField label="Confirm Password">

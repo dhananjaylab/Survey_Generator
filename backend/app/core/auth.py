@@ -1,54 +1,91 @@
-"""JWT Authentication utilities for the Survey Generator API."""
+"""
+JWT authentication dependencies for FastAPI route protection.
 
+Two dependency functions are provided:
+
+  verify_token   — Used as a router-level dependency (no return value needed).
+                   Applied to all survey, file, and WebSocket routers.
+
+  get_current_user — Used when an endpoint needs to know which user is calling.
+                     Returns the user_id string (== username) from the JWT.
+
+Both validate the token via decode_access_token() from core.security.
+"""
 from typing import Optional
-from fastapi import Depends, HTTPException, status, Request
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 from app.core.security import decode_access_token
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-security = HTTPBearer()
+_security = HTTPBearer(auto_error=False)
 
 
-def verify_token(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+def _extract_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> Optional[str]:
+    """Decode the Bearer JWT and return the user_id, or None on failure."""
+    if not credentials or credentials.scheme.lower() != "bearer":
+        return None
+    return decode_access_token(credentials.credentials, token_type="access")
+
+
+def verify_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
+) -> str:
     """
-    Verify JWT token from Authorization header and set user_id in request state.
-    
-    Args:
-        request: FastAPI request object
-        credentials: HTTP Bearer credentials from Authorization header
-        
-    Returns:
-        User ID from token
-        
-    Raises:
-        HTTPException: If token is invalid, expired, or missing
+    FastAPI dependency — verifies the JWT and stores user_id in request.state.
+
+    Raises 401 if the token is absent, expired, or malformed.
+    Intended for use as a router-level dependency:
+
+        router = APIRouter(dependencies=[Depends(verify_token)])
     """
-    if not credentials:
-        logger.warning("token_verification_failed_no_credentials")
+    user_id = _extract_user_id(credentials)
+    if not user_id:
+        logger.warning("token_verification_failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization credentials",
+            detail="Invalid or missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    token = credentials.credentials
-    
-    # Decode and validate token
-    user_id = decode_access_token(token)
-    
-    if user_id is None:
-        logger.warning("token_verification_failed_invalid_token")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Set user_id in request state for downstream use
+
     request.state.user_id = user_id
-    
-    logger.info("token_verified_successfully", user_id=user_id)
     return user_id
 
+
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
+) -> str:
+    """
+    FastAPI dependency — returns the authenticated user_id.
+
+    Use in endpoint signatures when you need to know the caller:
+
+        @router.get("/surveys/")
+        async def list_surveys(current_user: str = Depends(get_current_user)):
+            ...
+
+    Raises 401 on failure (same as verify_token).
+    """
+    # If verify_token already ran (router-level dep), re-use its stored value
+    # to avoid decoding the JWT twice.
+    if hasattr(request.state, "user_id") and request.state.user_id:
+        return request.state.user_id
+
+    user_id = _extract_user_id(credentials)
+    if not user_id:
+        logger.warning("get_current_user_failed")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    request.state.user_id = user_id
+    return user_id

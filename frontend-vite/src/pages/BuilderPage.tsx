@@ -12,7 +12,7 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 export const BuilderPage: React.FC = () => {
   const [selectedQuestionId, setSelectedQuestionId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
-  const { currentSurvey, currentSurveyDocLink, currentProject, setCurrentSurveyDocLink } = useSurveyStore();
+  const { currentSurvey, currentProject, setCurrentSurveyDocLink } = useSurveyStore();
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');

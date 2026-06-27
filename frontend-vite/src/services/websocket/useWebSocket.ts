@@ -1,90 +1,73 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import type { WebSocketMessage, WebSocketStatus } from '@/types/websocket';
-import { websocketService } from './websocketService';
+/**
+ * useWebSocket hook — wraps WebSocketService with React state.
+ *
+ * Phase 2 addition: `hasFailed` flag, set true when the service reports
+ * status 'failed' (auth failure or exhausted reconnects). Consumers
+ * (e.g. CreateSurveyPage) use this to decide whether to fall back to
+ * polling — polling is pointless if the auth token itself is invalid,
+ * but useful for transient network drops.
+ *
+ * `connect` is wrapped in useCallback with a stable dependency array so
+ * it can be safely used as a useEffect dependency without re-triggering
+ * on every render.
+ */
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { WebSocketService, type ProgressMessage, type WebSocketStatus } from './websocketService';
 
-interface UseWebSocketOptions {
-  requestId: string;
-  autoConnect?: boolean;
-  onMessage?: (message: WebSocketMessage) => void;
-  onStatusChange?: (status: WebSocketStatus) => void;
-}
-
-interface UseWebSocketReturn {
+interface UseWebSocketResult {
   status: WebSocketStatus;
-  connect: () => Promise<void>;
+  hasFailed: boolean;
+  lastMessage: ProgressMessage | null;
+  connect: (requestId: string) => void;
   disconnect: () => void;
-  isConnected: boolean;
-  isConnecting: boolean;
-  error: string | null;
 }
 
-export const useWebSocket = ({
-  requestId,
-  autoConnect = false,
-  onMessage,
-  onStatusChange,
-}: UseWebSocketOptions): UseWebSocketReturn => {
+export function useWebSocket(onMessage?: (msg: ProgressMessage) => void): UseWebSocketResult {
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
-  const [error, setError] = useState<string | null>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-  const statusUnsubscribeRef = useRef<(() => void) | null>(null);
+  const [hasFailed, setHasFailed] = useState(false);
+  const [lastMessage, setLastMessage] = useState<ProgressMessage | null>(null);
 
-  const connect = useCallback(async () => {
-    try {
-      setError(null);
-      await websocketService.connect(requestId);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Connection failed';
-      setError(errorMessage);
-      throw err;
+  const serviceRef = useRef<WebSocketService | null>(null);
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+
+  if (!serviceRef.current) {
+    serviceRef.current = new WebSocketService();
+  }
+
+  const handleStatusChange = useCallback((newStatus: WebSocketStatus) => {
+    setStatus(newStatus);
+    if (newStatus === 'failed') {
+      setHasFailed(true);
     }
-  }, [requestId]);
-
-  const disconnect = useCallback(() => {
-    websocketService.disconnect();
-    setError(null);
+    if (newStatus === 'connecting') {
+      setHasFailed(false);
+    }
   }, []);
 
+  const connect = useCallback((requestId: string) => {
+    setHasFailed(false);
+    serviceRef.current?.connect(
+      requestId,
+      (msg) => {
+        setLastMessage(msg);
+        onMessageRef.current?.(msg);
+      },
+      handleStatusChange
+    );
+  }, [handleStatusChange]);
+
+  const disconnect = useCallback(() => {
+    serviceRef.current?.disconnect();
+    setStatus('disconnected');
+  }, []);
+
+  // Cleanup on unmount
   useEffect(() => {
-    // Subscribe to messages
-    if (onMessage) {
-      unsubscribeRef.current = websocketService.subscribe(requestId, onMessage);
-    }
-
-    // Subscribe to status changes
-    const handleStatusChange = (newStatus: WebSocketStatus) => {
-      setStatus(newStatus);
-      if (onStatusChange) {
-        onStatusChange(newStatus);
-      }
-    };
-
-    statusUnsubscribeRef.current = websocketService.onStatusChange(handleStatusChange);
-
-    // Auto-connect if requested
-    if (autoConnect) {
-      connect().catch((err) => {
-        console.error('Auto-connect failed:', err);
-      });
-    }
-
-    // Cleanup on unmount
     return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-      if (statusUnsubscribeRef.current) {
-        statusUnsubscribeRef.current();
-      }
+      serviceRef.current?.disconnect();
     };
-  }, [requestId, onMessage, onStatusChange, autoConnect, connect]);
+  }, []);
 
-  return {
-    status,
-    connect,
-    disconnect,
-    isConnected: status === 'connected',
-    isConnecting: status === 'connecting',
-    error,
-  };
-};
+  return { status, hasFailed, lastMessage, connect, disconnect };
+}

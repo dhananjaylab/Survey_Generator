@@ -67,7 +67,6 @@ export const TriggersPanel: React.FC = () => {
   };
 
   const TriggerCard = ({ 
-    id, 
     icon: Icon, 
     title, 
     description, 

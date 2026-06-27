@@ -104,29 +104,32 @@ export const PreviewPage: React.FC = () => {
                   <p className="text-xs text-gray-400 mt-4 font-bold uppercase tracking-widest">press Enter ↵</p>
                 </div>
               </div>
-            ) : (
+            ) : (() => {
+              const currentQuestion = questions[currentQuestionIndex];
+              if (!currentQuestion) return null;
+              return (
               <div className="space-y-10">
                 <div className="space-y-4">
                   <div className="flex items-center space-x-4">
                     <span className="text-blue-600 font-black text-2xl">{currentQuestionIndex + 1} →</span>
                     <h3 className="text-3xl font-black text-gray-900 leading-tight">
-                      {questions[currentQuestionIndex].title}
-                      {questions[currentQuestionIndex].required && <span className="text-red-500 ml-2">*</span>}
+                      {currentQuestion.title}
+                      {currentQuestion.required && <span className="text-red-500 ml-2">*</span>}
                     </h3>
                   </div>
-                  {questions[currentQuestionIndex].description && (
+                  {currentQuestion.description && (
                     <p className="text-lg text-gray-400 font-medium italic pl-12">
-                      {questions[currentQuestionIndex].description}
+                      {currentQuestion.description}
                     </p>
                   )}
                 </div>
 
                 <div className="pl-12 pt-4">
-                  {questions[currentQuestionIndex].type === 'video' && (
+                  {currentQuestion.type === 'video' && (
                     <div className="aspect-video w-full rounded-3xl overflow-hidden shadow-2xl bg-black border border-gray-100">
-                      {questions[currentQuestionIndex].videoUrl ? (
+                      {currentQuestion.videoUrl ? (
                         <iframe 
-                          src={getEmbedUrl(questions[currentQuestionIndex].videoUrl)} 
+                          src={getEmbedUrl(currentQuestion.videoUrl)} 
                           className="w-full h-full" 
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                           allowFullScreen
@@ -139,13 +142,13 @@ export const PreviewPage: React.FC = () => {
                     </div>
                   )}
 
-                  {questions[currentQuestionIndex].type === 'multiple-choice' && (
+                  {currentQuestion.type === 'multiple-choice' && (
                     <div className="space-y-3">
-                      {questions[currentQuestionIndex].choices?.map((choice, idx) => (
+                      {currentQuestion.choices?.map((choice, idx) => (
                         <button 
                           key={choice.id}
                           onClick={() => {
-                            setAnswers({ ...answers, [questions[currentQuestionIndex].id]: choice.value });
+                            setAnswers({ ...answers, [currentQuestion.id]: choice.value });
                             handleNext();
                           }}
                           className="w-full flex items-center p-4 border-2 border-gray-100 rounded-2xl hover:border-gray-900 hover:bg-gray-50 transition-all font-bold text-gray-800 text-left group"
@@ -159,31 +162,31 @@ export const PreviewPage: React.FC = () => {
                     </div>
                   )}
 
-                  {questions[currentQuestionIndex].type === 'text' && (
+                  {currentQuestion.type === 'text' && (
                     <div className="space-y-4">
                       <textarea 
                         className="w-full p-6 text-2xl font-bold bg-transparent border-b-2 border-gray-100 outline-none focus:border-gray-900 transition-colors placeholder-gray-200 min-h-[120px]" 
                         placeholder="Type your answer here..."
                         autoFocus
-                        value={answers[questions[currentQuestionIndex].id] || ''}
-                        onChange={(e) => setAnswers({ ...answers, [questions[currentQuestionIndex].id]: e.target.value })}
+                        value={answers[currentQuestion.id] || ''}
+                        onChange={(e) => setAnswers({ ...answers, [currentQuestion.id]: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleNext()}
                       />
                     </div>
                   )}
 
-                  {(questions[currentQuestionIndex].type === 'rating' || questions[currentQuestionIndex].type === 'opinion-scale' || questions[currentQuestionIndex].type === 'nps') && (
+                  {(currentQuestion.type === 'rating' || currentQuestion.type === 'opinion-scale' || currentQuestion.type === 'nps') && (
                     <div className="space-y-6">
                       <div className="flex flex-wrap gap-2">
-                        {[...Array((questions[currentQuestionIndex].maxScale || (questions[currentQuestionIndex].type === 'nps' ? 10 : 5)) + 1)].map((_, i) => {
-                          const val = questions[currentQuestionIndex].type === 'rating' ? i + 1 : i;
-                          if (questions[currentQuestionIndex].type === 'rating' && val > (questions[currentQuestionIndex].maxScale || 5)) return null;
+                        {[...Array((currentQuestion.maxScale || (currentQuestion.type === 'nps' ? 10 : 5)) + 1)].map((_, i) => {
+                          const val = currentQuestion.type === 'rating' ? i + 1 : i;
+                          if (currentQuestion.type === 'rating' && val > (currentQuestion.maxScale || 5)) return null;
                           
                           return (
                             <button
                               key={i}
                               onClick={() => {
-                                setAnswers({ ...answers, [questions[currentQuestionIndex].id]: val });
+                                setAnswers({ ...answers, [currentQuestion.id]: val });
                                 handleNext();
                               }}
                               className="w-14 h-14 flex items-center justify-center border-2 border-gray-100 rounded-2xl font-black text-xl hover:border-gray-900 hover:bg-gray-50 transition-all"
@@ -193,10 +196,10 @@ export const PreviewPage: React.FC = () => {
                           );
                         })}
                       </div>
-                      {(questions[currentQuestionIndex].lowLabel || questions[currentQuestionIndex].highLabel) && (
+                      {(currentQuestion.lowLabel || currentQuestion.highLabel) && (
                         <div className="flex justify-between text-xs font-black uppercase tracking-widest text-gray-400 max-w-xl">
-                          <span>{questions[currentQuestionIndex].lowLabel || 'Poor'}</span>
-                          <span>{questions[currentQuestionIndex].highLabel || 'Excellent'}</span>
+                          <span>{currentQuestion.lowLabel || 'Poor'}</span>
+                          <span>{currentQuestion.highLabel || 'Excellent'}</span>
                         </div>
                       )}
                     </div>
@@ -221,7 +224,8 @@ export const PreviewPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* Progress Bar */}

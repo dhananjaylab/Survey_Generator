@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
 
 export const Header: React.FC = () => {
-  const { isAuthenticated, user, logout } = useAuthStore();
+  const { isAuthenticated, tokens, logout } = useAuthStore();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
@@ -41,7 +41,7 @@ export const Header: React.FC = () => {
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
                 <span className="text-sm text-gray-700">
-                  {user?.username || 'User'}
+                  {tokens?.access_token ? 'User' : 'User'}
                 </span>
                 <Button variant="outline" size="sm" onClick={handleLogout}>
                   Logout
@@ -89,7 +89,7 @@ export const Header: React.FC = () => {
           <div className="pt-4 pb-3 border-t border-gray-200">
             {isAuthenticated ? (
               <div className="flex items-center px-4 space-x-3">
-                <div className="text-base font-medium text-gray-800">{user?.username || 'User'}</div>
+                <div className="text-base font-medium text-gray-800">User</div>
                 <Button variant="outline" size="sm" onClick={handleLogout} className="ml-auto">
                   Logout
                 </Button>

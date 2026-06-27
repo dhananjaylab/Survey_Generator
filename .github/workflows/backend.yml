@@ -1,0 +1,92 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  test:
+    name: Test & Migrate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB:       survey_test
+          POSTGRES_USER:     survey
+          POSTGRES_PASSWORD: survey
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL:  postgresql://survey:survey@localhost:5432/survey_test
+      REDIS_URL:     redis://localhost:6379/0
+      SECRET_KEY:    ci-secret-key-not-for-production
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      PROJECT_NAME:  survey-generator
+      ENVIRONMENT:   development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Check no pending migrations
+        run: |
+          # Fails if there are model changes not yet captured in a migration.
+          alembic check
+        continue-on-error: false
+
+      - name: Run tests
+        run: pytest -v --tb=short
+
+  deploy:
+    name: Deploy to production
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Replace this step with your actual deploy mechanism ────────────────
+      # Examples: Railway CLI, Fly.io, AWS ECS, Docker push, etc.
+      - name: Deploy (placeholder)
+        run: echo "Deploy step — configure for your hosting provider"
