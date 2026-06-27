@@ -39,14 +39,12 @@ def _parse_questions_payload(raw: str | dict) -> dict[str, Any]:
     trimmed = raw.strip()
 
     if trimmed.startswith("```"):
-        fenced = trimmed.split("
-")
+        fenced = trimmed.split("\n")
         if fenced and fenced[0].startswith("```"):
             fenced = fenced[1:]
         if fenced and fenced[-1].strip().startswith("```"):
             fenced = fenced[:-1]
-        candidates.append("
-".join(fenced).strip())
+        candidates.append("\n".join(fenced).strip())
 
     start_idx = trimmed.find("{")
     end_idx = trimmed.rfind("}")
