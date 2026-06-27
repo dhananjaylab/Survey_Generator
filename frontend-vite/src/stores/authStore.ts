@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AuthState, AuthTokens, LoginCredentials, RegisterData } from '@/types/auth';
 import { ApiEndpoints } from '@/services/api/endpoints';
+import { ApiErrorHandler } from '@/services/api/errorHandler';
 import { logger } from '@/utils/logger';
 
 // ── One-time migration: old key → new key ─────────────────────────────────────
@@ -51,7 +52,7 @@ export const useAuthStore = create<AuthState>()(
           set({ tokens, isAuthenticated: true, isLoading: false, error: null });
           logger.debug('[auth] login successful');
         } catch (err: any) {
-          const message = err?.detail ?? err?.message ?? 'Login failed';
+          const message = ApiErrorHandler.handle(err).detail;
           set({ error: message, isLoading: false, isAuthenticated: false });
           throw err;
         }
@@ -64,7 +65,7 @@ export const useAuthStore = create<AuthState>()(
           set({ tokens, isAuthenticated: true, isLoading: false, error: null });
           logger.debug('[auth] registration successful');
         } catch (err: any) {
-          const message = err?.detail ?? err?.message ?? 'Registration failed';
+          const message = ApiErrorHandler.handle(err).detail;
           set({ error: message, isLoading: false });
           throw err;
         }
@@ -96,3 +97,4 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
