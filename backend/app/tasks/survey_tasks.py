@@ -161,7 +161,7 @@ async def async_generate_survey(
       1. Fill missing planning context in the worker
       2. Generate questions via AI (JSON mode)
       3. Build DOCX document
-      4. Upload to R2 (with local disk fallback)
+      4. Upload to R2
       5. Build SurveyJS pages JSON
       6. Persist to DB as COMPLETED
     """
@@ -250,7 +250,7 @@ async def async_generate_survey(
         doc.save(doc_io)
         doc_io.seek(0)
 
-        # ── 3. Upload to R2 with local fallback ───────────────────────────────
+        # ── 3. Upload to R2 ─────────────────────────────────────────────────
         await publish_progress(request_id, "UPLOADING_DOCUMENT")
         filename = f"{project_name.replace(' ', '_')}_questionnaire_{request_id}.docx"
         doc_link: str | None = None
@@ -263,27 +263,14 @@ async def async_generate_survey(
             )
 
             if r2_url:
-                doc_link = f"/api/v1/files/download/{filename}"
-                logger.info("r2_upload_success", request_id=request_id)
+                doc_link = r2_url
+                logger.info("r2_upload_success", request_id=request_id, doc_link=doc_link)
             else:
-                logger.warning("r2_upload_returned_none", request_id=request_id)
+                raise RuntimeError("R2 upload failed and no download URL was returned")
 
         except Exception as exc:
             logger.warning("r2_upload_exception", request_id=request_id, error=str(exc))
-
-        # Local fallback — write to disk if R2 failed or returned None
-        if not doc_link:
-            local_dir = Path(__file__).resolve().parent.parent / "questionnaires"
-            local_dir.mkdir(parents=True, exist_ok=True)
-            local_path = local_dir / filename
-            doc_io.seek(0)
-            local_path.write_bytes(doc_io.read())
-            doc_link = f"/api/v1/files/download/{filename}"
-            logger.warning(
-                "r2_upload_failed_saved_locally",
-                request_id=request_id,
-                local_path=str(local_path),
-            )
+            raise
 
         # ── 4. Build SurveyJS pages ───────────────────────────────────────────
         pages = [{

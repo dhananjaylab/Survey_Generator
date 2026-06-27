@@ -41,12 +41,13 @@ class StorageService:
             self.s3_client.upload_file(file_path, self.bucket_name, object_name)
             logger.info(f"Successfully uploaded {file_path} to R2 as {object_name}")
             
-            # Construct and return the public URL
+            # Construct and return a usable link for the caller.
+            # If a public bucket URL is configured we prefer that. Otherwise
+            # return a backend download path, which will fetch from R2.
             if self.public_url:
                 return f"{self.public_url}/{object_name}"
-            else:
-                logger.warning("R2_PUBLIC_URL is not set. Cannot return a public link.")
-                return None
+            filename = object_name.split("/")[-1]
+            return f"/api/v1/files/download/{filename}"
                 
         except ClientError as e:
             logger.error(f"Failed to upload file to R2: {e}")
@@ -74,7 +75,8 @@ class StorageService:
             
             if self.public_url:
                 return f"{self.public_url}/{object_name}"
-            return None
+            filename = object_name.split("/")[-1]
+            return f"/api/v1/files/download/{filename}"
                 
         except ClientError as e:
             logger.error(f"Failed to upload fileobj to R2: {e}")
