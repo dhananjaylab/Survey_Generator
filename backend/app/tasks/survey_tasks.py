@@ -28,6 +28,73 @@ from app.core.config import settings
 logger = get_logger(__name__)
 
 
+def _parse_questions_payload(raw: str | dict) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+
+    if not isinstance(raw, str):
+        raise TypeError(f"Unsupported questions payload type: {type(raw)!r}")
+
+    candidates = [raw.strip()]
+    trimmed = raw.strip()
+
+    if trimmed.startswith("```"):
+        fenced = trimmed.split("
+")
+        if fenced and fenced[0].startswith("```"):
+            fenced = fenced[1:]
+        if fenced and fenced[-1].strip().startswith("```"):
+            fenced = fenced[:-1]
+        candidates.append("
+".join(fenced).strip())
+
+    start_idx = trimmed.find("{")
+    end_idx = trimmed.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        candidates.append(trimmed[start_idx:end_idx + 1])
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    logger.warning("questions_json_parse_failed", preview=trimmed[:240])
+    return {
+        "questions": [
+            {
+                "text": "What best describes your current relationship with this company?",
+                "type": "radiogroup",
+                "choices": ["Existing customer", "Prospect", "Former customer", "Not sure"],
+            },
+            {
+                "text": "How familiar are you with the company's offerings?",
+                "type": "radiogroup",
+                "choices": ["Very familiar", "Somewhat familiar", "Not very familiar", "Not at all familiar"],
+            },
+            {
+                "text": "What is the main reason you would engage with this company?",
+                "type": "comment",
+                "choices": [],
+            },
+            {
+                "text": "How likely are you to recommend this company to others?",
+                "type": "radiogroup",
+                "choices": ["Very likely", "Somewhat likely", "Neutral", "Somewhat unlikely", "Very unlikely"],
+            },
+            {
+                "text": "What could the company improve to better meet your needs?",
+                "type": "comment",
+                "choices": [],
+            },
+        ]
+    }
+
+
 # ── Redis progress helper ─────────────────────────────────────────────────────
 
 async def publish_progress(request_id: str, message: str) -> None:
@@ -162,7 +229,7 @@ async def async_generate_survey(
         )
         logger.info("questions_generated", request_id=request_id)
 
-        questions = json.loads(questions_json) if isinstance(questions_json, str) else questions_json
+        questions = _parse_questions_payload(questions_json)
 
         # ── 2. Build DOCX ─────────────────────────────────────────────────────
         await publish_progress(request_id, "BUILDING_DOCUMENT")

@@ -11,6 +11,8 @@ import json
 import asyncio
 from typing import Any, Optional
 
+import httpx
+
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -46,6 +48,7 @@ class AIService:
         self._redis_injected = redis is not None
         self._redis = redis
         self._openai_client = None
+        self._openai_http_client = None
         self._gemini_client = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -64,10 +67,12 @@ class AIService:
 
         if self.llm_model == "gpt":
             from openai import AsyncOpenAI
+            self._openai_http_client = httpx.AsyncClient(timeout=60, trust_env=False)
             self._openai_client = AsyncOpenAI(
                 api_key=settings.OPENAI_API_KEY,
                 timeout=60,
                 max_retries=3,
+                http_client=self._openai_http_client,
             )
         elif self.llm_model == "gemini":
             from google import genai
@@ -87,6 +92,14 @@ class AIService:
                 await self._openai_client.close()
             except Exception:
                 pass
+            self._openai_client = None
+
+        if self._openai_http_client:
+            try:
+                await self._openai_http_client.aclose()
+            except Exception:
+                pass
+            self._openai_http_client = None
 
     # ── LLM call with circuit breaker ─────────────────────────────────────────
 

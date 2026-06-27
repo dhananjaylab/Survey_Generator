@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -20,16 +22,19 @@ class OpenAIProvider:
 
     def __init__(self) -> None:
         self._client = None  # created lazily in initialize()
+        self._http_client = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     async def initialize(self) -> None:
         from openai import AsyncOpenAI
 
+        self._http_client = httpx.AsyncClient(timeout=60, trust_env=False)
         self._client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
             timeout=60,
             max_retries=3,
+            http_client=self._http_client,
         )
         logger.info("openai_provider_initialized", model=settings.CHATGPT_MODEL)
 
@@ -40,6 +45,13 @@ class OpenAIProvider:
             except Exception as exc:
                 logger.warning("openai_client_close_error", error=str(exc))
             self._client = None
+
+        if self._http_client:
+            try:
+                await self._http_client.aclose()
+            except Exception as exc:
+                logger.warning("openai_http_client_close_error", error=str(exc))
+            self._http_client = None
 
     # ── Completion ─────────────────────────────────────────────────────────────
 
