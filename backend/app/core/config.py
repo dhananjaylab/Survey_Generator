@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY:  str = ""
     CHATGPT_MODEL:   str = "gpt-4o"
     GOOGLE_API_KEY:  str = ""
-    GEMINI_MODEL:    str = "gemini-2.0-flash"
+    GEMINI_MODEL:    str = "gemini-2.5-flash"
 
     # ── Cloudflare R2 ─────────────────────────────────────────────────────────
     R2_ACCOUNT_ID:        str = ""

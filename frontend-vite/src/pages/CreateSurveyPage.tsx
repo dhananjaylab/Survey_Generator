@@ -283,13 +283,14 @@ export const CreateSurveyPage: React.FC = () => {
     try {
       const data = await ApiEndpoints.getBusinessOverview({
         company_name: companyName,
-        raw_input: useCase || companyName,
+        raw_input: [useCase.trim(), companyName.trim()].filter(Boolean).join('\n\n'),
         llm_model: llmModel,
       });
       setBusinessOverviewText(data.business_overview ?? '');
       setShowOverview(true);
     } catch (err: any) {
-      addNotification({ type: 'error', title: 'AI error', message: err?.detail ?? 'Failed to generate overview' });
+      const message = err?.response?.data?.detail ?? err?.detail ?? 'Failed to generate overview';
+      addNotification({ type: 'error', title: 'AI error', message });
     } finally {
       setIsAiThinking(false);
     }

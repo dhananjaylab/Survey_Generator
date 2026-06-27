@@ -7,6 +7,7 @@ into the four endpoints that call AIService with caching.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import Optional
 import crypto
 import os
@@ -29,6 +30,18 @@ router = APIRouter(
 )
 
 
+
+def _survey_access_filter(current_user: str):
+    """
+    Legacy surveys created before username ownership was stored may have a NULL
+    username. Keep them visible to the signed-in user so older history does not
+    disappear after auth migrations.
+    """
+    return or_(
+        SurveyRequestRecord.username == current_user,
+        SurveyRequestRecord.username.is_(None),
+    )
+
 # ── Redis dependency ──────────────────────────────────────────────────────────
 
 def get_redis(request: Request):
@@ -40,7 +53,9 @@ def get_redis(request: Request):
 
 class BusinessOverviewRequest(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
-    raw_input:    str = Field(..., min_length=10, max_length=2000)
+    # Business overview should work even when the user only provides a company
+    # name, so keep the optional context field permissive.
+    raw_input:    str = Field(..., min_length=1, max_length=2000)
     llm_model:    str = Field(default="gpt")
 
 
@@ -197,7 +212,7 @@ async def get_survey_status(
         db.query(SurveyRequestRecord)
         .filter(
             SurveyRequestRecord.request_id == request_id,
-            SurveyRequestRecord.username == current_user,
+            _survey_access_filter(current_user),
         )
         .first()
     )
@@ -221,9 +236,8 @@ async def list_surveys(
 ):
     records = (
         db.query(SurveyRequestRecord)
-        .filter(SurveyRequestRecord.username == current_user)
+        .filter(_survey_access_filter(current_user))
         .order_by(SurveyRequestRecord.created_at.desc())
-        .limit(50)
         .all()
     )
     return {
@@ -251,7 +265,7 @@ async def delete_survey(
         db.query(SurveyRequestRecord)
         .filter(
             SurveyRequestRecord.request_id == request_id,
-            SurveyRequestRecord.username == current_user,
+            _survey_access_filter(current_user),
         )
         .first()
     )
@@ -276,7 +290,7 @@ async def regenerate_survey_document(
         db.query(SurveyRequestRecord)
         .filter(
             SurveyRequestRecord.request_id == req.request_id,
-            SurveyRequestRecord.username == current_user,
+            _survey_access_filter(current_user),
         )
         .first()
     )
@@ -299,3 +313,6 @@ async def get_settings(current_user: str = Depends(get_current_user)):
         "default_model":    "gpt",
         "web_search":       False,
     }
+
+
+
