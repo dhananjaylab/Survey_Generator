@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Survey Generator"
     VERSION:      str = "1.0.0"
     ENVIRONMENT:  str = "development"
-    DEBUG:        bool = False
+    DEBUG:        bool = True
 
     # ── Security ─────────────────────────────────────────────────────────────
     SECRET_KEY: str = "your-secret-key-change-in-production"

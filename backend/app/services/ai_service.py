@@ -249,6 +249,40 @@ class AIService:
         await self._cache_set(cache_key, result)
         return result
 
+    async def generate_use_case(
+        self,
+        company_name: str,
+        business_overview: str,
+    ) -> str:
+        cache_key = f"use_case:{self.llm_model}:{hash(company_name + business_overview)}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            logger.info("cache_hit", cache_key=cache_key[:40])
+            return cached
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a market research strategist. Write a short, clear "
+                    "research use case or research goal for a survey. Keep it to "
+                    "one concise paragraph and make it specific to the company."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Company: {company_name}\n\n"
+                    f"Business overview:\n{business_overview}\n\n"
+                    "Draft a research use case that explains what this survey should "
+                    "help the company learn."
+                ),
+            },
+        ]
+        result = await self._call_llm(messages, temperature=0.5)
+        await self._cache_set(cache_key, result)
+        return result
+
     async def generate_research_objectives(
         self,
         business_overview: str,

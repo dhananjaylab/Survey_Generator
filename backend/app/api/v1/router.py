@@ -61,7 +61,9 @@ class BusinessOverviewRequest(BaseModel):
 
 class UseCaseRequest(BaseModel):
     company_name:      str = Field(..., min_length=1, max_length=200)
-    business_overview: str = Field(..., min_length=10, max_length=5000)
+    # Allow the use-case generator to work even when the overview is still
+    # rough or only lightly filled in by the user.
+    business_overview: str = Field(..., min_length=1, max_length=5000)
     llm_model:         str = Field(default="gpt")
 
 
@@ -75,10 +77,10 @@ class GenerateSurveyRequest(BaseModel):
     request_id:          str = Field(...)
     project_name:        str = Field(..., min_length=1, max_length=200)
     company_name:        str = Field(..., min_length=1, max_length=200)
-    business_overview:   str = Field(..., min_length=10, max_length=5000)
-    research_objectives: str = Field(..., min_length=10, max_length=2000)
+    business_overview:   str = Field(default="", max_length=5000)
+    research_objectives: str = Field(default="", max_length=2000)
     industry:            str = Field(..., max_length=100)
-    use_case:            str = Field(..., min_length=10, max_length=2000)
+    use_case:            str = Field(default="", max_length=2000)
     llm_model:           str = Field(default="gpt")
     use_web_search:      bool = Field(default=False)
 
@@ -182,6 +184,10 @@ async def generate_survey(
         username=current_user,
         project_name=req.project_name,
         company_name=req.company_name,
+        industry=req.industry,
+        use_case=req.use_case or None,
+        business_overview=req.business_overview or None,
+        research_objectives=req.research_objectives or None,
         status="PENDING",
     )
     db.add(record)
@@ -226,6 +232,10 @@ async def get_survey_status(
         "pages":       record.pages,
         "project_name": record.project_name,
         "company_name": record.company_name,
+        "industry": record.industry,
+        "use_case": record.use_case,
+        "business_overview": record.business_overview,
+        "research_objectives": record.research_objectives,
     }
 
 
@@ -313,6 +323,4 @@ async def get_settings(current_user: str = Depends(get_current_user)):
         "default_model":    "gpt",
         "web_search":       False,
     }
-
-
 
