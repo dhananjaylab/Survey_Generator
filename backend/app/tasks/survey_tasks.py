@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Dict, Any
 
 import asyncio
-from celery import Task
 from docx import Document
 
 from app.core.celery import celery_app
@@ -51,6 +50,9 @@ def update_survey_status(
     pages=None,
     questionnaire_data=None,
     doc_link: str | None = None,
+    business_overview: str | None = None,
+    use_case: str | None = None,
+    research_objectives: str | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -67,6 +69,12 @@ def update_survey_status(
                 record.questionnaire_data = questionnaire_data
             if doc_link is not None:
                 record.doc_link = doc_link
+            if business_overview is not None:
+                record.business_overview = business_overview
+            if use_case is not None:
+                record.use_case = use_case
+            if research_objectives is not None:
+                record.research_objectives = research_objectives
             db.commit()
             logger.info("survey_status_updated", request_id=request_id, status=status)
     except Exception as exc:
@@ -85,11 +93,12 @@ async def async_generate_survey(
 ) -> None:
     """
     Full survey generation pipeline:
-      1. Generate questions via AI (JSON mode)
-      2. Build DOCX document
-      3. Upload to R2 (with local disk fallback)
-      4. Build SurveyJS pages JSON
-      5. Persist to DB as COMPLETED
+      1. Fill missing planning context in the worker
+      2. Generate questions via AI (JSON mode)
+      3. Build DOCX document
+      4. Upload to R2 (with local disk fallback)
+      5. Build SurveyJS pages JSON
+      6. Persist to DB as COMPLETED
     """
     logger.info("survey_generation_started", request_id=request_id, llm_model=llm_model)
     t0 = time.time()
@@ -97,13 +106,51 @@ async def async_generate_survey(
     ai_service = AIService(llm_model=llm_model)
     try:
         await ai_service.initialize()
+        update_survey_status(request_id, "RUNNING")
         await publish_progress(request_id, "STARTED")
 
-        company_name        = data["company_name"]
-        business_overview   = data["business_overview"]
-        research_objectives = data["research_objectives"]
-        project_name        = data["project_name"]
-        use_web_search      = data.get("use_web_search", False)
+        company_name = data["company_name"]
+        project_name = data["project_name"]
+        industry = data.get("industry", "")
+        use_web_search = data.get("use_web_search", False)
+        business_overview = (data.get("business_overview") or "").strip()
+        use_case = (data.get("use_case") or "").strip()
+        research_objectives = (data.get("research_objectives") or "").strip()
+
+        if not business_overview:
+            await publish_progress(request_id, "GENERATING_BUSINESS_OVERVIEW")
+            business_overview = await ai_service.generate_business_overview(
+                company_name=company_name,
+                raw_input=use_case or industry or company_name,
+            )
+            update_survey_status(
+                request_id,
+                "RUNNING",
+                business_overview=business_overview,
+            )
+
+        if not use_case:
+            await publish_progress(request_id, "GENERATING_USE_CASE")
+            use_case = await ai_service.generate_use_case(
+                company_name=company_name,
+                business_overview=business_overview,
+            )
+            update_survey_status(request_id, "RUNNING", use_case=use_case)
+
+        if not research_objectives:
+            await publish_progress(request_id, "GENERATING_RESEARCH_OBJECTIVES")
+            research_objectives = await ai_service.generate_research_objectives(
+                business_overview=business_overview,
+                use_case=use_case,
+            )
+            update_survey_status(
+                request_id,
+                "RUNNING",
+                research_objectives=research_objectives,
+            )
+
+        if not business_overview or not use_case or not research_objectives:
+            raise ValueError("AI planning pipeline returned incomplete survey context")
 
         # ── 1. Generate questions ─────────────────────────────────────────────
         await publish_progress(request_id, "GENERATING_QUESTIONS")
@@ -119,7 +166,7 @@ async def async_generate_survey(
 
         # ── 2. Build DOCX ─────────────────────────────────────────────────────
         await publish_progress(request_id, "BUILDING_DOCUMENT")
-        assets_dir    = Path(__file__).resolve().parent.parent / "assets"
+        assets_dir = Path(__file__).resolve().parent.parent / "assets"
         template_path = assets_dir / "template_new.docx"
         doc = Document(str(template_path)) if template_path.exists() else Document()
 
@@ -131,7 +178,7 @@ async def async_generate_survey(
             p = doc.add_paragraph(style="List Number")
             p.add_run(q.get("text", "")).bold = True
             for choice in q.get("choices", []):
-                doc.add_paragraph(choice, style="List Bullet 2")
+                doc.add_paragraph(str(choice), style="List Bullet 2")
             doc.add_paragraph()
 
         doc_io = BytesIO()
@@ -174,7 +221,7 @@ async def async_generate_survey(
             )
 
         # ── 4. Build SurveyJS pages ───────────────────────────────────────────
-        pages = json.dumps([{
+        pages = [{
             "name": "page1",
             "elements": [
                 {
@@ -185,15 +232,18 @@ async def async_generate_survey(
                 }
                 for i, q in enumerate(questions.get("questions", []), 1)
             ],
-        }])
+        }]
 
         # ── 5. Persist as COMPLETED ───────────────────────────────────────────
-        # Only reach here if doc_link is set — either R2 or local fallback.
         update_survey_status(
             request_id,
             "COMPLETED",
             pages=pages,
+            questionnaire_data=questions,
             doc_link=doc_link,
+            business_overview=business_overview,
+            use_case=use_case,
+            research_objectives=research_objectives,
         )
 
         elapsed = round(time.time() - t0, 2)
@@ -213,29 +263,8 @@ async def async_generate_survey(
     finally:
         await ai_service.close()
 
-
-# ── Celery task wrapper ───────────────────────────────────────────────────────
-
-class AsyncTask(Task):
-    """Base task that runs an async coroutine inside a new event loop."""
-
-    def run(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def __call__(self, *args, **kwargs):
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(self.run_async(*args, **kwargs))
-        finally:
-            loop.close()
-
-    async def run_async(self, *args, **kwargs):
-        raise NotImplementedError
-
-
 @celery_app.task(
     bind=True,
-    base=AsyncTask,
     name="tasks.generate_survey",
     # REMOVED: autoretry_for, retry_backoff, retry_backoff_max, retry_jitter
     # Reason: having both autoretry_for AND manual self.retry() causes double-firing.
@@ -250,9 +279,7 @@ def generate_survey_task(
     llm_model: str = "gpt",
 ) -> None:
     try:
-        asyncio.get_event_loop().run_until_complete(
-            async_generate_survey(request_id, data, llm_model)
-        )
+        asyncio.run(async_generate_survey(request_id, data, llm_model))
     except Exception as exc:
         update_survey_status(request_id, "FAILED")
 
@@ -275,3 +302,5 @@ def generate_survey_task(
             error=str(exc),
         )
         raise
+
+

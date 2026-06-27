@@ -91,6 +91,7 @@ export const CreateSurveyPage: React.FC = () => {
   const {
     setCurrentProject,
     setBusinessOverview,
+    setResearchObjectives,
     setIsGenerating,
     isGenerating,
     setCurrentSurvey,
@@ -109,6 +110,8 @@ export const CreateSurveyPage: React.FC = () => {
   const [useWebSearch, setUseWebSearch] = React.useState(false);
   const [businessOverviewText, setBusinessOverviewText] = React.useState('');
   const [showOverview, setShowOverview] = React.useState(false);
+  const [researchObjectivesText, setResearchObjectivesText] = React.useState('');
+  const [isGeneratingUseCase, setIsGeneratingUseCase] = React.useState(false);
   const [formErrors, setFormErrors] = React.useState<Record<string, string>>({});
 
   // ── Generation state ─────────────────────────────────────────────────────────
@@ -219,10 +222,16 @@ export const CreateSurveyPage: React.FC = () => {
         }))
       );
 
+      const resolvedOverview = data.business_overview ?? businessOverviewText;
+      const resolvedResearchObjectives = data.research_objectives ?? researchObjectivesText;
+      setBusinessOverview(resolvedOverview);
+      setResearchObjectives(resolvedResearchObjectives);
+      setResearchObjectivesText(resolvedResearchObjectives);
+
       const survey: Survey = {
         id: requestId,
         title: projectName || 'Draft Survey',
-        description: businessOverviewText || '',
+        description: resolvedOverview || '',
         pages: [{ id: 'page1', name: 'page1', title: 'Questions', questions }],
         settings: {
           showProgressBar: true,
@@ -270,29 +279,51 @@ export const CreateSurveyPage: React.FC = () => {
     const errs: Record<string, string> = {};
     if (!projectName.trim()) errs.projectName = 'Project name is required';
     if (!companyName.trim()) errs.companyName = 'Company name is required';
-    if (!useCase.trim()) errs.useCase = 'Use case is required';
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   // ── Generate business overview via AI ─────────────────────────────────────────
 
+  const fetchBusinessOverview = async () => {
+    const data = await ApiEndpoints.getBusinessOverview({
+      company_name: companyName,
+      raw_input: [useCase.trim(), companyName.trim()].filter(Boolean).join('\n\n'),
+      llm_model: llmModel,
+    });
+    return data.business_overview ?? '';
+  };
+
   const generateOverview = async () => {
     if (!companyName.trim()) return;
     setIsAiThinking(true);
     try {
-      const data = await ApiEndpoints.getBusinessOverview({
-        company_name: companyName,
-        raw_input: [useCase.trim(), companyName.trim()].filter(Boolean).join('\n\n'),
-        llm_model: llmModel,
-      });
-      setBusinessOverviewText(data.business_overview ?? '');
+      const overview = await fetchBusinessOverview();
+      setBusinessOverviewText(overview);
       setShowOverview(true);
     } catch (err: any) {
       const message = err?.response?.data?.detail ?? err?.detail ?? 'Failed to generate overview';
       addNotification({ type: 'error', title: 'AI error', message });
     } finally {
       setIsAiThinking(false);
+    }
+  };
+
+  const generateUseCase = async () => {
+    if (!companyName.trim()) return;
+    setIsGeneratingUseCase(true);
+    try {
+      const data = await ApiEndpoints.generateUseCase({
+        company_name: companyName,
+        business_overview: businessOverviewText.trim() || companyName.trim(),
+        llm_model: llmModel,
+      });
+      setUseCase(data.use_case ?? '');
+    } catch (err: any) {
+      const message = err?.response?.data?.detail ?? err?.detail ?? 'Failed to generate use case';
+      addNotification({ type: 'error', title: 'AI error', message });
+    } finally {
+      setIsGeneratingUseCase(false);
     }
   };
 
@@ -306,32 +337,35 @@ export const CreateSurveyPage: React.FC = () => {
     setRequestId(reqId);
     completionFiredRef.current = false;
 
+    const overview = businessOverviewText.trim();
+    const researchObjectives = researchObjectivesText.trim();
     setCurrentProject({ projectName, companyName, industry, useCase, llmProvider: llmModel });
-    setBusinessOverview(businessOverviewText);
+    setBusinessOverview(overview || null);
+    setResearchObjectives(researchObjectives || null);
     setIsGenerating(true);
-    setProgressLog([{ time: new Date().toLocaleTimeString(), msg: 'Starting survey generation…' }]);
+    setProgressLog([{ time: new Date().toLocaleTimeString(), msg: 'Submitting generation job...' }]);
 
     try {
       await ApiEndpoints.generateSurvey({
         request_id: reqId,
         project_name: projectName,
         company_name: companyName,
-        business_overview: businessOverviewText,
-        research_objectives: '',
+        business_overview: overview,
+        research_objectives: researchObjectives,
         industry,
-        use_case: useCase,
+        use_case: useCase.trim(),
         llm_model: llmModel,
         use_web_search: useWebSearch,
       });
 
       // Connect WebSocket after confirming the task was accepted
       wsConnect(reqId);
-      appendLog('Generation started — listening for updates…');
+      appendLog('Generation job accepted - listening for updates...');
     } catch (err: any) {
-      handleFailure(err?.detail ?? 'Failed to start generation');
+      const message = err?.response?.data?.detail ?? err?.detail ?? 'Failed to start generation';
+      handleFailure(message);
     }
   };
-
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -392,13 +426,26 @@ export const CreateSurveyPage: React.FC = () => {
 
           {/* Use Case */}
           <FormField label="Use Case / Research Goal" error={formErrors.useCase}>
-            <Textarea
-              value={useCase}
-              onChange={(e) => setUseCase(e.target.value)}
-              placeholder="Describe what you want to learn from this survey…"
-              rows={4}
-              disabled={isGenerating}
-            />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={generateUseCase}
+                  disabled={isGenerating || isGeneratingUseCase || !companyName.trim()}
+                >
+                  {isGeneratingUseCase ? 'Generating…' : '✨ AI Generate Use Case'}
+                </Button>
+              </div>
+              <Textarea
+                value={useCase}
+                onChange={(e) => setUseCase(e.target.value)}
+                placeholder="Describe what you want to learn from this survey…"
+                rows={4}
+                disabled={isGenerating}
+              />
+            </div>
           </FormField>
 
           {/* Web search toggle */}
@@ -527,3 +574,4 @@ function mapChoices(el: any): Choice[] {
     value: typeof c === 'string' ? c : c.value ?? c.text ?? '',
   }));
 }
+
