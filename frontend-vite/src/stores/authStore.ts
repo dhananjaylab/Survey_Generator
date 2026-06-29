@@ -1,24 +1,27 @@
 /**
- * Auth store — single source of truth for authentication state.
+ * Auth store — Phase 3 update.
  *
- * Phase 2 consolidation:
- *  - AuthService deleted; this store calls ApiEndpoints directly
- *  - Tokens persisted under a single localStorage key: 'auth'
- *  - setTokens() exposed for the HTTP interceptor's silent refresh
- *  - No dual-write, no fallback reads from 'auth-tokens'
+ * Phase 3 change: logout() now hits /api/v1/auth/logout to blocklist the
+ * refresh token server-side, preventing replay even if the token is still
+ * within its 72-hour TTL.  Local state is cleared regardless of whether
+ * the network call succeeds (fail-open for UX).
  *
- * Migration shim (remove after 7 days of dual-deploy):
- *  On first load, moves tokens from old 'auth-store' key to new 'auth' key.
+ * Phase 2 retained:
+ *  - Single 'auth' localStorage key
+ *  - Migration shim from old 'auth-store' key
+ *  - setTokens() for silent refresh interceptor
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import axios from 'axios';
 import type { AuthState, AuthTokens, LoginCredentials, RegisterData } from '@/types/auth';
 import { ApiEndpoints } from '@/services/api/endpoints';
 import { ApiErrorHandler } from '@/services/api/errorHandler';
 import { logger } from '@/utils/logger';
 
-// ── One-time migration: old key → new key ─────────────────────────────────────
-// Remove this block after all users' old tokens have expired (7 days post-deploy).
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+
+// ── One-time migration ────────────────────────────────────────────────────────
 try {
   const oldRaw = localStorage.getItem('auth-store');
   if (oldRaw && !localStorage.getItem('auth')) {
@@ -32,18 +35,16 @@ try {
     localStorage.removeItem('auth-tokens');
   }
 } catch {
-  // Non-fatal — user will just need to log in again
+  // Non-fatal
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tokens: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
-
-      // ── Actions ─────────────────────────────────────────────────────────────
 
       login: async (credentials: LoginCredentials): Promise<void> => {
         set({ isLoading: true, error: null });
@@ -72,12 +73,28 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: (): void => {
+        const { tokens } = get();
+
+        // Phase 3: notify server to blocklist the refresh token.
+        // Use a bare axios call (not httpService) to avoid the 401 interceptor
+        // triggering a refresh attempt on the way out.
+        if (tokens?.refresh_token) {
+          axios
+            .post(
+              `${BASE_URL}/api/v1/auth/logout`,
+              { refresh_token: tokens.refresh_token },
+              { headers: { Authorization: `Bearer ${tokens.access_token}` } }
+            )
+            .catch((err) => {
+              logger.warn('[auth] server-side logout failed (token may still be valid briefly)', err);
+            });
+        }
+
+        // Always clear client state regardless of network outcome
         set({ tokens: null, isAuthenticated: false, error: null });
-        // persist middleware will clear 'auth' from localStorage automatically
         logger.debug('[auth] logged out');
       },
 
-      /** Called by the HTTP interceptor after a successful silent refresh. */
       setTokens: (tokens: AuthTokens): void => {
         set({ tokens, isAuthenticated: true });
       },
@@ -87,7 +104,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'auth',                              // single localStorage key
+      name: 'auth',
       partialize: (state) => ({ tokens: state.tokens }),
       onRehydrateStorage: () => (state) => {
         if (state?.tokens) {
@@ -97,4 +114,3 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
-

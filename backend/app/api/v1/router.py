@@ -3,16 +3,19 @@ Survey generation API router.
 
 Phase 2 change: shared Redis pool injected via get_redis() dependency
 into the four endpoints that call AIService with caching.
+
+Validation fix:
+  - Removed stray `import crypto` / `import os`
+  - Added _survey_access_filter() so legacy rows with username=NULL
+    remain visible to the signed-in user after the auth migration
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
-import crypto
-import os
 
-from app.models.database import get_db, SessionLocal
+from app.models.database import get_db
 from app.models.survey import SurveyRequestRecord
 from app.services.ai_service import AIService
 from app.core.auth import verify_token, get_current_user
@@ -30,6 +33,7 @@ router = APIRouter(
 )
 
 
+# ── Ownership filter ──────────────────────────────────────────────────────────
 
 def _survey_access_filter(current_user: str):
     """
@@ -42,6 +46,7 @@ def _survey_access_filter(current_user: str):
         SurveyRequestRecord.username.is_(None),
     )
 
+
 # ── Redis dependency ──────────────────────────────────────────────────────────
 
 def get_redis(request: Request):
@@ -53,16 +58,12 @@ def get_redis(request: Request):
 
 class BusinessOverviewRequest(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
-    # Business overview should work even when the user only provides a company
-    # name, so keep the optional context field permissive.
     raw_input:    str = Field(..., min_length=1, max_length=2000)
     llm_model:    str = Field(default="gpt")
 
 
 class UseCaseRequest(BaseModel):
     company_name:      str = Field(..., min_length=1, max_length=200)
-    # Allow the use-case generator to work even when the overview is still
-    # rough or only lightly filled in by the user.
     business_overview: str = Field(..., min_length=1, max_length=5000)
     llm_model:         str = Field(default="gpt")
 
@@ -86,16 +87,20 @@ class GenerateSurveyRequest(BaseModel):
 
 
 class RegenerateDocumentRequest(BaseModel):
-    request_id:   str
-    project_name: str = Field(..., min_length=1, max_length=200)
+    request_id:         str
+    project_name:       str = Field(..., min_length=1, max_length=200)
+    company_name:       str = Field(default="", max_length=200)
+    survey_title:       str = Field(default="", max_length=200)
+    survey_description: str = Field(default="", max_length=1000)
+    pages:              list = Field(default_factory=list)
 
 
 class SurveySettingsRequest(BaseModel):
-    llm_model:     Optional[str] = None
+    llm_model:      Optional[str] = None
     use_web_search: Optional[bool] = None
 
 
-# ── Endpoints that use AIService with shared Redis ────────────────────────────
+# ── AI endpoints (shared Redis cache) ─────────────────────────────────────────
 
 @router.post("/business-overview")
 @limiter.limit("10/minute")
@@ -105,7 +110,6 @@ async def get_business_overview(
     redis=Depends(get_redis),
     current_user: str = Depends(get_current_user),
 ):
-    """Generate a business overview using AI with Redis caching."""
     logger.info("business_overview_requested", user=current_user)
     service = AIService(llm_model=req.llm_model, redis=redis)
     await service.initialize()
@@ -171,14 +175,9 @@ async def generate_survey(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user),
 ):
-    """
-    Enqueue a survey generation task.
-    Returns 202 immediately; poll /status/{request_id} or subscribe to WebSocket.
-    """
     logger.info("survey_generate_requested", request_id=req.request_id, user=current_user)
     metrics.record_survey_started()
 
-    # Create DB record immediately
     record = SurveyRequestRecord(
         request_id=req.request_id,
         username=current_user,
@@ -193,7 +192,6 @@ async def generate_survey(
     db.add(record)
     db.commit()
 
-    # Enqueue Celery task
     from app.tasks.survey_tasks import generate_survey_task
     generate_survey_task.delay(
         request_id=req.request_id,
@@ -226,15 +224,15 @@ async def get_survey_status(
         raise HTTPException(status_code=404, detail="Survey not found")
 
     return {
-        "request_id":  record.request_id,
-        "status":      record.status,
-        "doc_link":    record.doc_link,
-        "pages":       record.pages,
-        "project_name": record.project_name,
-        "company_name": record.company_name,
-        "industry": record.industry,
-        "use_case": record.use_case,
-        "business_overview": record.business_overview,
+        "request_id":          record.request_id,
+        "status":              record.status,
+        "doc_link":            record.doc_link,
+        "pages":               record.pages,
+        "project_name":        record.project_name,
+        "company_name":        record.company_name,
+        "industry":            record.industry,
+        "use_case":            record.use_case,
+        "business_overview":   record.business_overview,
         "research_objectives": record.research_objectives,
     }
 
@@ -261,7 +259,8 @@ async def list_surveys(
                 "created_at":   r.created_at.isoformat() if r.created_at else None,
             }
             for r in records
-        ]
+        ],
+        "success": 1,
     }
 
 
@@ -285,7 +284,7 @@ async def delete_survey(
     db.delete(record)
     db.commit()
     logger.info("survey_deleted", request_id=request_id, user=current_user)
-    return {"message": "Survey deleted"}
+    return {"message": "Survey deleted", "success": 1}
 
 
 @router.post("/regenerate-document")
@@ -310,10 +309,41 @@ async def regenerate_survey_document(
     from app.tasks.survey_tasks import generate_survey_task
     generate_survey_task.delay(
         request_id=req.request_id,
-        data={"project_name": req.project_name, "company_name": record.company_name},
+        data={
+            "project_name": req.project_name,
+            "company_name": req.company_name or record.company_name,
+        },
         llm_model="gpt",
     )
-    return {"message": "Document regeneration started", "request_id": req.request_id}
+    return {
+        "message": "Document regeneration started",
+        "request_id": req.request_id,
+        "success": 1,
+    }
+
+
+@router.put("/{survey_id}/settings")
+async def update_survey_settings(
+    survey_id: str,
+    settings: dict,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Persist behavioural trigger settings from the Builder page."""
+    record = (
+        db.query(SurveyRequestRecord)
+        .filter(
+            SurveyRequestRecord.request_id == survey_id,
+            _survey_access_filter(current_user),
+        )
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Survey not found")
+
+    record.settings = settings
+    db.commit()
+    return {"message": "Settings updated", "success": 1}
 
 
 @router.get("/settings")
@@ -323,4 +353,3 @@ async def get_settings(current_user: str = Depends(get_current_user)):
         "default_model":    "gpt",
         "web_search":       False,
     }
-

@@ -1,12 +1,15 @@
 """
-Application configuration — additions for Phase 1 / 2.
+Application configuration.
 
-Add the following fields to the existing Settings class in config.py.
-The full file is shown here; merge with your existing version if it has
-additional fields not listed below.
+Validation fix (Phase 3):
+  - Added PROMPTS_BASE_PATH (required by app.utils.prompts.PromptTemplates)
+
+Phase 1 / 2 additions (retained):
+  - SECRET_KEY production guard
+  - ALLOWED_ORIGINS comma-separated with allowed_origins_list property
+  - SENTRY_DSN + OTEL_ENDPOINT observability stubs
 """
 import os
-from typing import Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
@@ -23,7 +26,7 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     @classmethod
-    def validate_secret_key(cls, v: str, info) -> str:
+    def validate_secret_key(cls, v: str) -> str:
         env = os.getenv("ENVIRONMENT", "development")
         if env != "development" and v == "your-secret-key-change-in-production":
             raise ValueError("SECRET_KEY must be set in production")
@@ -36,9 +39,6 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # Comma-separated list of allowed origins.
-    # Example:  ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
-    # Defaults to localhost variants for local development.
     ALLOWED_ORIGINS: str = (
         "http://localhost:3000,"
         "http://localhost:5173,"
@@ -48,14 +48,17 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> list[str]:
-        """Parse ALLOWED_ORIGINS into a list, stripping whitespace."""
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     # ── AI Providers ──────────────────────────────────────────────────────────
-    OPENAI_API_KEY:  str = ""
-    CHATGPT_MODEL:   str = "gpt-4o"
-    GOOGLE_API_KEY:  str = ""
-    GEMINI_MODEL:    str = "gemini-2.5-flash"
+    OPENAI_API_KEY: str = ""
+    CHATGPT_MODEL:  str = "gpt-4o"
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL:   str = "gemini-2.5-flash"
+
+    # ── Prompts ───────────────────────────────────────────────────────────────
+    # Validation fix: was missing, referenced in app/utils/prompts.py
+    PROMPTS_BASE_PATH: str = "prompts/prompts_chatgpt"
 
     # ── Cloudflare R2 ─────────────────────────────────────────────────────────
     R2_ACCOUNT_ID:        str = ""
@@ -65,12 +68,10 @@ class Settings(BaseSettings):
     R2_PUBLIC_URL:        str = ""
 
     # ── Observability (Phase 3) ───────────────────────────────────────────────
-    # Set SENTRY_DSN to enable Sentry error tracking.
-    SENTRY_DSN: str = ""
-
-    # Set OTEL_ENDPOINT to enable OpenTelemetry tracing.
-    # Example: http://localhost:4317  (Grafana Tempo / Jaeger OTLP gRPC endpoint)
+    SENTRY_DSN:    str = ""
     OTEL_ENDPOINT: str = ""
+    # Service name shown in Sentry / Grafana traces
+    OTEL_SERVICE_NAME: str = "ai-survey-generator"
 
     class Config:
         env_file = ("app/.env", ".env")
