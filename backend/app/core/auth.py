@@ -1,22 +1,24 @@
 """
-JWT authentication dependencies for FastAPI route protection.
+JWT authentication dependencies — Phase 3 update.
 
-Two dependency functions are provided:
+Phase 3 addition:
+  - verify_token() and get_current_user() check the token's jti against
+    the Redis blocklist (populated by /logout and /refresh).
+    This closes the window where a stolen access token could be used
+    after the user has logged out.
 
-  verify_token   — Used as a router-level dependency (no return value needed).
-                   Applied to all survey, file, and WebSocket routers.
-
-  get_current_user — Used when an endpoint needs to know which user is calling.
-                     Returns the user_id string (== username) from the JWT.
-
-Both validate the token via decode_access_token() from core.security.
+Phase 1 / 2 (retained):
+  - HTTPBearer extraction
+  - request.state.user_id caching to avoid double-decode per request
 """
 from typing import Optional
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, decode_token_payload
+from app.core.token_blocklist import TokenBlocklist
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,28 +26,53 @@ logger = get_logger(__name__)
 _security = HTTPBearer(auto_error=False)
 
 
-def _extract_user_id(
+def _get_redis(request: Request):
+    return getattr(request.app.state, "redis", None)
+
+
+async def _resolve_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials],
 ) -> Optional[str]:
-    """Decode the Bearer JWT and return the user_id, or None on failure."""
+    """
+    Decode Bearer JWT, validate type and blocklist, return user_id or None.
+    Result is cached on request.state so it is only computed once per request.
+    """
+    if hasattr(request.state, "user_id") and request.state.user_id:
+        return request.state.user_id
+
     if not credentials or credentials.scheme.lower() != "bearer":
         return None
-    return decode_access_token(credentials.credentials, token_type="access")
+
+    token = credentials.credentials
+
+    # Decode payload first to get jti (needed for blocklist check)
+    payload = decode_token_payload(token)
+    if not payload or payload.get("type") != "access":
+        return None
+
+    user_id: Optional[str] = payload.get("sub")
+    if not user_id:
+        return None
+
+    # Phase 3: blocklist check
+    jti = payload.get("jti")
+    if jti:
+        redis = _get_redis(request)
+        if await TokenBlocklist.is_blocked(jti, redis):
+            logger.warning("access_token_blocklisted", jti=jti[:8])
+            return None
+
+    request.state.user_id = user_id
+    return user_id
 
 
-def verify_token(
+async def verify_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
 ) -> str:
-    """
-    FastAPI dependency — verifies the JWT and stores user_id in request.state.
-
-    Raises 401 if the token is absent, expired, or malformed.
-    Intended for use as a router-level dependency:
-
-        router = APIRouter(dependencies=[Depends(verify_token)])
-    """
-    user_id = _extract_user_id(credentials)
+    """Router-level dependency — raises 401 if token is absent/invalid/revoked."""
+    user_id = await _resolve_user(request, credentials)
     if not user_id:
         logger.warning("token_verification_failed")
         raise HTTPException(
@@ -53,32 +80,15 @@ def verify_token(
             detail="Invalid or missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    request.state.user_id = user_id
     return user_id
 
 
-def get_current_user(
+async def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
 ) -> str:
-    """
-    FastAPI dependency — returns the authenticated user_id.
-
-    Use in endpoint signatures when you need to know the caller:
-
-        @router.get("/surveys/")
-        async def list_surveys(current_user: str = Depends(get_current_user)):
-            ...
-
-    Raises 401 on failure (same as verify_token).
-    """
-    # If verify_token already ran (router-level dep), re-use its stored value
-    # to avoid decoding the JWT twice.
-    if hasattr(request.state, "user_id") and request.state.user_id:
-        return request.state.user_id
-
-    user_id = _extract_user_id(credentials)
+    """Endpoint-level dependency — returns authenticated user_id."""
+    user_id = await _resolve_user(request, credentials)
     if not user_id:
         logger.warning("get_current_user_failed")
         raise HTTPException(
@@ -86,6 +96,4 @@ def get_current_user(
             detail="Invalid or missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    request.state.user_id = user_id
     return user_id

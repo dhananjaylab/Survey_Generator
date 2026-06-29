@@ -1,11 +1,17 @@
 """
-Security utilities: password hashing and JWT token management.
+Security utilities — Phase 3 update.
 
-Changes from original:
-  - Access token TTL reduced to 1 hour (was 24h)
-  - Added refresh token support (72h TTL)
-  - Added 'jti' (JWT ID) claim for future token blocklist support
-  - Added 'type' claim to distinguish access vs refresh tokens
+Phase 3 additions:
+  - decode_access_token() now returns Optional[str] as before but also
+    exposes the raw payload via decode_token_payload() for blocklist
+    checks (jti) and expiry (exp).
+  - Helper create_token_pair() for DRY token creation in auth endpoints.
+
+Phase 1 / 2 retained:
+  - Access token TTL = 1 hour, refresh token TTL = 72 hours
+  - 'type' claim distinguishes access vs refresh
+  - 'jti' (UUID4) claim enables per-token revocation
+  - 72-byte-safe bcrypt password truncation
 """
 import uuid
 import bcrypt
@@ -19,7 +25,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS  = 1    # was 24 — refresh token handles long sessions
+ACCESS_TOKEN_EXPIRE_HOURS  = 1
 REFRESH_TOKEN_EXPIRE_HOURS = 72
 
 TokenType = Literal["access", "refresh"]
@@ -42,9 +48,7 @@ def _truncate_password(password: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
-    password_bytes = _truncate_password(password)
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+    return bcrypt.hashpw(_truncate_password(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -61,17 +65,6 @@ def create_access_token(
     expires_delta: Optional[timedelta] = None,
     token_type: TokenType = "access",
 ) -> str:
-    """
-    Create a signed JWT.
-
-    Args:
-        user_id:       Subject claim value (username).
-        expires_delta: Custom expiry — defaults to 1h (access) or 72h (refresh).
-        token_type:    'access' or 'refresh'. Stored in the 'type' claim.
-
-    Returns:
-        Signed JWT string.
-    """
     if expires_delta is None:
         hours = REFRESH_TOKEN_EXPIRE_HOURS if token_type == "refresh" else ACCESS_TOKEN_EXPIRE_HOURS
         expires_delta = timedelta(hours=hours)
@@ -83,59 +76,70 @@ def create_access_token(
         "sub":  user_id,
         "exp":  expire,
         "iat":  now,
-        "jti":  str(uuid.uuid4()),   # unique ID — enables per-token revocation
+        "jti":  str(uuid.uuid4()),
         "type": token_type,
     }
 
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
-    logger.info(
-        "token_created",
-        user_id=user_id,
-        token_type=token_type,
-        expires_at=expire.isoformat(),
-    )
+    logger.info("token_created", user_id=user_id, token_type=token_type)
     return token
 
 
-# ── Token validation ──────────────────────────────────────────────────────────
+def create_token_pair(user_id: str) -> tuple[str, str]:
+    """Return (access_token, refresh_token) as a convenience helper."""
+    return (
+        create_access_token(user_id, token_type="access"),
+        create_access_token(user_id, token_type="refresh"),
+    )
 
-def decode_access_token(
-    token: str,
-    token_type: TokenType = "access",
-) -> Optional[str]:
+
+# ── Token decoding ────────────────────────────────────────────────────────────
+
+def decode_token_payload(token: str) -> Optional[dict]:
     """
-    Decode and validate a JWT.
-
-    Args:
-        token:      Encoded JWT string.
-        token_type: Expected type — 'access' or 'refresh'.
-                    Tokens of the wrong type are rejected.
-
-    Returns:
-        user_id (sub claim) on success, None on any failure.
+    Decode a JWT and return its full payload dict, or None on any error.
+    Does NOT validate the 'type' claim — use decode_access_token() for
+    type-checked decoding.
     """
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-
-        user_id: Optional[str] = payload.get("sub")
-        if not user_id:
-            logger.warning("token_decode_no_sub")
-            return None
-
-        if payload.get("type") != token_type:
-            logger.warning(
-                "token_type_mismatch",
-                expected=token_type,
-                got=payload.get("type"),
-            )
-            return None
-
-        logger.info("token_decoded", user_id=user_id, token_type=token_type)
-        return user_id
-
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:
         logger.warning("token_expired")
         return None
     except jwt.InvalidTokenError as exc:
         logger.warning("token_invalid", error=str(exc))
         return None
+
+
+def decode_access_token(
+    token: str,
+    token_type: TokenType = "access",
+) -> Optional[str]:
+    """
+    Decode and validate a JWT, checking the 'type' claim.
+
+    Phase 3 note: the caller is responsible for the blocklist check
+    (see core/auth.py and api/v1/auth.py) using the jti from
+    decode_token_payload() before or after calling this function.
+
+    Returns user_id (sub claim) on success, None on any failure.
+    """
+    payload = decode_token_payload(token)
+    if payload is None:
+        return None
+
+    user_id: Optional[str] = payload.get("sub")
+    if not user_id:
+        logger.warning("token_decode_no_sub")
+        return None
+
+    if payload.get("type") != token_type:
+        logger.warning(
+            "token_type_mismatch",
+            expected=token_type,
+            got=payload.get("type"),
+        )
+        return None
+
+    logger.info("token_decoded", user_id=user_id, token_type=token_type)
+    return user_id
