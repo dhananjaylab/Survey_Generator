@@ -30,7 +30,9 @@ export const TriggersPanel: React.FC = () => {
   const syncSettings = async (updatedSettings: any) => {
     setSyncStatus('saving');
     try {
-      await ApiEndpoints.updateSurveySettings(currentSurvey.id, updatedSettings);
+      const surveyId = currentSurvey.id || (currentSurvey as any).request_id;
+      if (!surveyId) throw new Error("Missing survey ID");
+      await ApiEndpoints.updateSurveySettings(surveyId, updatedSettings);
       setSyncStatus('saved');
       setTimeout(() => setSyncStatus('idle'), 2000);
     } catch (error) {
@@ -224,3 +226,5 @@ export const TriggersPanel: React.FC = () => {
     </div>
   );
 };
+
+

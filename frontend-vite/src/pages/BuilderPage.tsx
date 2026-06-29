@@ -100,10 +100,14 @@ export const BuilderPage: React.FC = () => {
         duration: 3000,
       });
 
+      const requestId = currentSurvey.id || (currentSurvey as any).request_id;
+      if (!requestId) {
+        throw new Error("Missing survey request ID");
+      }
       const backendPages = convertSurveyToBackendFormat();
       
       console.log('📄 Regenerating document with:', {
-        request_id: currentSurvey.id,
+        request_id: requestId,
         project_name: currentProject.projectName,
         company_name: currentProject.companyName,
         survey_title: currentSurvey.title,
@@ -111,7 +115,7 @@ export const BuilderPage: React.FC = () => {
       });
       
       const regenerateResponse = await ApiEndpoints.regenerateSurveyDocument({
-        request_id: currentSurvey.id,
+        request_id: requestId,
         project_name: currentProject.projectName,
         company_name: currentProject.companyName,
         survey_title: currentSurvey.title,
@@ -236,3 +240,5 @@ export const BuilderPage: React.FC = () => {
     </div>
   );
 };
+
+
