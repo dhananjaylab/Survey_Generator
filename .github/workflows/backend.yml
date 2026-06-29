@@ -44,13 +44,16 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL:  postgresql://survey:survey@localhost:5432/survey_test
-      REDIS_URL:     redis://localhost:6379/0
-      SECRET_KEY:    ci-secret-key-not-for-production
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      PROJECT_NAME:  survey-generator
-      ENVIRONMENT:   development
+      DATABASE_URL:         postgresql://survey:survey@localhost:5432/survey_test
+      REDIS_URL:            redis://localhost:6379/0
+      SECRET_KEY:           ci-secret-key-not-for-production
+      OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY:       ${{ secrets.GOOGLE_API_KEY }}
+      PROJECT_NAME:         survey-generator
+      ENVIRONMENT:          development
+      # Phase 3: leave blank in CI so Sentry / OTEL init is skipped
+      SENTRY_DSN:           ""
+      OTEL_ENDPOINT:        ""
 
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +72,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Check no pending migrations
-        run: |
-          # Fails if there are model changes not yet captured in a migration.
-          alembic check
-        continue-on-error: false
+        run: alembic check
 
       - name: Run tests
         run: pytest -v --tb=short
@@ -86,7 +86,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Replace this step with your actual deploy mechanism ────────────────
-      # Examples: Railway CLI, Fly.io, AWS ECS, Docker push, etc.
       - name: Deploy (placeholder)
         run: echo "Deploy step — configure for your hosting provider"
