@@ -1,24 +1,18 @@
 /**
- * ErrorBoundary — catches render errors in its subtree and shows a
- * recoverable fallback UI instead of a blank white screen.
+ * ErrorBoundary — Phase 3 update.
  *
- * Phase 2 addition: wrapped around each protected route in App.tsx.
- * Without this, any unhandled error in a page component (e.g. a
- * malformed survey JSON crashing the builder) would unmount the
- * entire React tree, including the navigation — leaving the user
- * stuck with no way back except a manual URL change.
- *
- * onError prop is the hook point for Sentry (Phase 3):
- *   <ErrorBoundary onError={(err, info) => Sentry.captureException(err, { extra: info })}>
+ * Phase 3 change: componentDidCatch() now calls captureException()
+ * directly, so route-level errors are captured even when the onError
+ * prop is not passed.  The onError prop is still supported for callers
+ * that need additional side-effects (e.g. App.tsx logging).
  */
 import * as React from 'react';
 import { logger } from '@/utils/logger';
+import { captureException } from '@/utils/sentry';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
-  /** Called with the error and React's componentStack info. */
   onError?: (error: Error, info: React.ErrorInfo) => void;
-  /** Optional custom fallback — receives the error and a reset function. */
   fallback?: (error: Error, reset: () => void) => React.ReactNode;
 }
 
@@ -35,6 +29,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     logger.error('[ErrorBoundary] caught render error', error, info.componentStack);
+
+    // Phase 3: forward to Sentry (no-op when DSN is unset)
+    captureException(error, { componentStack: info.componentStack ?? '' }).catch(() => undefined);
+
     this.props.onError?.(error, info);
   }
 
@@ -44,14 +42,9 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   render(): React.ReactNode {
     const { error } = this.state;
+    if (!error) return this.props.children;
 
-    if (!error) {
-      return this.props.children;
-    }
-
-    if (this.props.fallback) {
-      return this.props.fallback(error, this.reset);
-    }
+    if (this.props.fallback) return this.props.fallback(error, this.reset);
 
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center">
