@@ -1,12 +1,10 @@
 /**
- * App.tsx — root component with routing.
+ * App.tsx — Phase 3 update.
  *
- * Phase 2 addition: each protected route is wrapped in <ErrorBoundary>.
- * handleBoundaryError is the single hook point for Sentry (Phase 3):
- *   Sentry.captureException(error, { extra: { componentStack: info.componentStack } })
- *
- * Lazy-loaded pages keep the initial bundle small; Suspense fallback
- * shows a centered "Loading..." message during chunk fetch.
+ * Phase 3 change: handleBoundaryError() now calls captureException()
+ * directly instead of just logging, so route-level boundary fires
+ * are reported to Sentry even when ErrorBoundary's own componentDidCatch
+ * already captured the same error (Sentry deduplicates by fingerprint).
  */
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout';
@@ -16,31 +14,36 @@ import { LoadingOverlay } from './components/ui/Spinner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './hooks/useAuth';
 import { logger } from './utils/logger';
+import { captureException } from './utils/sentry';
 import React, { Suspense } from 'react';
 
-const HomePage          = React.lazy(() => import('./pages').then((m) => ({ default: m.HomePage })));
-const LoginPage          = React.lazy(() => import('./pages').then((m) => ({ default: m.LoginPage })));
-const RegisterPage       = React.lazy(() => import('./pages').then((m) => ({ default: m.RegisterPage })));
-const ErrorPage          = React.lazy(() => import('./pages').then((m) => ({ default: m.ErrorPage })));
-const CreateSurveyPage   = React.lazy(() => import('./pages').then((m) => ({ default: m.CreateSurveyPage })));
-const BuilderPage        = React.lazy(() => import('./pages').then((m) => ({ default: m.BuilderPage })));
-const PreviewPage        = React.lazy(() => import('./pages').then((m) => ({ default: m.PreviewPage })));
-const DashboardPage      = React.lazy(() => import('./pages').then((m) => ({ default: m.DashboardPage })));
+const HomePage        = React.lazy(() => import('./pages').then((m) => ({ default: m.HomePage })));
+const LoginPage       = React.lazy(() => import('./pages').then((m) => ({ default: m.LoginPage })));
+const RegisterPage    = React.lazy(() => import('./pages').then((m) => ({ default: m.RegisterPage })));
+const ErrorPage       = React.lazy(() => import('./pages').then((m) => ({ default: m.ErrorPage })));
+const CreateSurveyPage = React.lazy(() => import('./pages').then((m) => ({ default: m.CreateSurveyPage })));
+const BuilderPage     = React.lazy(() => import('./pages').then((m) => ({ default: m.BuilderPage })));
+const PreviewPage     = React.lazy(() => import('./pages').then((m) => ({ default: m.PreviewPage })));
+const DashboardPage   = React.lazy(() => import('./pages').then((m) => ({ default: m.DashboardPage })));
 
 const SuspenseFallback = () => (
   <div className="min-h-screen flex items-center justify-center">Loading...</div>
 );
 
-/** Phase 3: wire this to Sentry.captureException. */
 function handleBoundaryError(error: Error, info: React.ErrorInfo): void {
   logger.error('[App] route-level error boundary triggered', {
     message: error.message,
     componentStack: info.componentStack,
   });
+  // Phase 3: also forward to Sentry (ErrorBoundary.componentDidCatch does
+  // the same, but this call adds route-level context via the extra payload)
+  captureException(error, {
+    context: 'route-boundary',
+    componentStack: info.componentStack ?? '',
+  }).catch(() => undefined);
 }
 
 function App() {
-  // Initializes auth state from persisted storage (no network call — see useAuth.ts)
   useAuth();
 
   return (
@@ -48,13 +51,10 @@ function App() {
       <Suspense fallback={<SuspenseFallback />}>
         <Routes>
           <Route path="/" element={<Layout />}>
-            {/* Public Routes */}
             <Route index element={<HomePage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="register" element={<RegisterPage />} />
 
-            {/* Protected Routes — each wrapped in its own ErrorBoundary so a
-                crash in one page doesn't take down the nav/layout shell. */}
             <Route
               path="dashboard"
               element={
@@ -95,14 +95,11 @@ function App() {
                 </ProtectedRoute>
               }
             />
-
-            {/* Error handling */}
             <Route path="*" element={<ErrorPage />} />
           </Route>
         </Routes>
       </Suspense>
 
-      {/* Global Modals & Notifications */}
       <NotificationContainer />
       <LoadingOverlay />
     </BrowserRouter>
