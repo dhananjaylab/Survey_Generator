@@ -1,12 +1,10 @@
 /**
- * Lightweight logger — replaces scattered console.log calls.
+ * Logger — Phase 3 update.
  *
- * Levels:
- *   debug — dev-only, stripped in production builds via import.meta.env.DEV
- *   http  — verbose request/response tracing, gated behind VITE_DEBUG_HTTP=true
- *           (so it can be enabled in prod for troubleshooting without a redeploy)
- *   warn  — always logged
- *   error — always logged, and is the hook point for Sentry (Phase 3)
+ * Phase 3 change: error() now forwards to Sentry when the DSN is
+ * configured. Uses the lazy captureException helper from utils/sentry.ts
+ * so that @sentry/react is never imported unless DSN is set, keeping the
+ * dev bundle clean.
  */
 
 const isDev = import.meta.env.DEV;
@@ -35,10 +33,13 @@ function error(...args: unknown[]): void {
   // eslint-disable-next-line no-console
   console.error(...args);
 
-  // Phase 3: forward to Sentry when configured
-  // if (window.Sentry && args[0] instanceof Error) {
-  //   window.Sentry.captureException(args[0]);
-  // }
+  // Phase 3: forward Error instances to Sentry
+  const firstArg = args[0];
+  if (firstArg instanceof Error && import.meta.env.VITE_SENTRY_DSN) {
+    import('@/utils/sentry').then(({ captureException }) => {
+      captureException(firstArg, { extra: args.slice(1) });
+    }).catch(() => undefined);
+  }
 }
 
 export const logger = { debug, http, warn, error };
