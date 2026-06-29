@@ -21,7 +21,7 @@ from app.core.security import create_access_token, decode_token_payload
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def redis():
     """In-memory aioredis compatible with fakeredis."""
     r = await fake_aioredis.FakeRedis(decode_responses=True)
@@ -39,7 +39,7 @@ def refresh_token():
     return create_access_token("test_user", token_type="refresh")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     from app.main import app
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -136,11 +136,14 @@ async def test_logout_endpoint_accepts_expired_token(client):
 # ── /auth/refresh blocklist tests ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_refresh_blocks_old_token_after_rotation(client, refresh_token):
+async def test_refresh_blocks_old_token_after_rotation(client, refresh_token, redis, monkeypatch):
     """
     After a successful /refresh call, the old refresh token's jti must be
     blocklisted so the same token cannot be used again.
     """
+    import app.api.v1.auth as auth_module
+    monkeypatch.setattr(auth_module, "_get_redis", lambda request: redis)
+
     # First refresh — should succeed
     r1 = await client.post(
         "/api/v1/auth/refresh",
@@ -189,3 +192,11 @@ def test_init_sentry_graceful_when_not_installed(monkeypatch):
             sys.modules["sentry_sdk"] = original
         else:
             del sys.modules["sentry_sdk"]
+
+
+
+
+
+
+
+

@@ -171,7 +171,7 @@ async def refresh(
         raise HTTPException(status_code=401, detail="Refresh token has been revoked")
 
     # Phase 3: blocklist the consumed refresh token
-    if jti and exp and redis:
+    if jti and exp:
         expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
         await TokenBlocklist.add(jti, expires_at, redis)
 
