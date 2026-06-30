@@ -16,6 +16,7 @@ export const BuilderPage: React.FC = () => {
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
+  const [exportMode, setExportMode] = React.useState<'local' | 'r2' | 'both'>('r2');
 
   const convertSurveyToBackendFormat = () => {
     // Convert frontend Survey format to backend SurveyJS format
@@ -105,81 +106,34 @@ export const BuilderPage: React.FC = () => {
     try {
       const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
 
-      // If we already have a usable link, download it directly instead of
-      // queueing a fresh regeneration job. That keeps export from re-running
-      // the survey pipeline unless the user is explicitly changing content.
-      if (currentSurveyDocLink) {
-        await ApiEndpoints.downloadFileByUrl(currentSurveyDocLink, filename);
-        addNotification({
-          type: 'success',
-          title: 'Survey Downloaded',
-          message: `Survey document "${filename}" has been downloaded successfully.`,
-          duration: 3000,
-        });
-        return;
-      }
-
-      // Step 1: Regenerate the document with current survey state
-      addNotification({
-        type: 'info',
-        title: 'Generating Document',
-        message: 'Creating document with your current survey changes...',
-        duration: 3000,
-      });
-
       const backendPages = convertSurveyToBackendFormat();
       
-      console.log('📄 Regenerating document with:', {
+      const exportResponse = await ApiEndpoints.exportDocument({
         request_id: requestId,
         project_name: currentProject.projectName,
         company_name: currentProject.companyName,
         survey_title: currentSurvey.title,
-        pages_count: backendPages.length,
-      });
-      
-      await ApiEndpoints.regenerateSurveyDocument({
-        request_id: requestId,
-        project_name: currentProject.projectName,
-        company_name: currentProject.companyName,
-        survey_title: currentSurvey.title,
+        survey_description: currentSurvey.description,
         pages: backendPages,
+        delivery_mode: exportMode === 'local' ? 'local' : exportMode,
       });
+
+      const docLink = exportResponse.doc_link;
+      if (docLink) {
+        if (docLink.startsWith('/api/v1/files/download/')) {
+          setCurrentSurveyDocLink(docLink);
+        }
+        await ApiEndpoints.downloadFileByUrl(docLink, filename);
+      }
 
       addNotification({
         type: 'success',
-        title: 'Export queued',
-        message: 'Your DOCX is being rebuilt. We will download it once the server finishes.',
-        duration: 3000,
-      });
-
-      const deadline = Date.now() + 120_000;
-      let docLink = currentSurveyDocLink;
-
-      while (Date.now() < deadline) {
-        const status = await ApiEndpoints.getSurveyStatus(requestId);
-        if (status.status === 'COMPLETED' && status.doc_link) {
-          docLink = status.doc_link;
-          setCurrentSurveyDocLink(status.doc_link);
-          break;
-        }
-
-        if (status.status === 'FAILED') {
-          throw new Error('Survey regeneration failed on the server.');
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
-
-      if (!docLink) {
-        throw new Error('Timed out waiting for the regenerated DOCX to be ready.');
-      }
-
-      await ApiEndpoints.downloadFileByUrl(docLink, filename);
-      
-      addNotification({
-        type: 'success',
-        title: 'Survey Downloaded',
-        message: `Survey document "${filename}" has been downloaded successfully.`,
+        title: 'Export complete',
+        message: exportMode === 'r2'
+          ? 'Your DOCX has been uploaded to R2.'
+          : exportMode === 'both'
+            ? 'Your DOCX has been saved locally and uploaded to R2.'
+            : 'Your DOCX has been saved locally.',
         duration: 3000,
       });
     } catch (error: any) {
@@ -221,6 +175,29 @@ export const BuilderPage: React.FC = () => {
             </svg>
             <span>Preview</span>
           </Button>
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setExportMode('local')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'local' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportMode('r2')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'r2' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              R2
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportMode('both')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'both' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Both
+            </button>
+          </div>
           <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />

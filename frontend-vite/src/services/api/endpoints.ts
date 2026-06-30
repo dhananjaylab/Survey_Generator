@@ -73,6 +73,7 @@ export class ApiEndpoints {
     use_case: string;
     llm_model?: string;
     use_web_search?: boolean;
+    delivery_mode?: "none" | "local" | "r2" | "both";
   }) {
     logger.http('[endpoints] POST /surveys/generate');
     const response = await httpService.post('/api/v1/surveys/generate', payload);
@@ -106,6 +107,20 @@ export class ApiEndpoints {
     return response.data;
   }
 
+  static async exportDocument(payload: {
+    request_id: string;
+    project_name: string;
+    company_name: string;
+    survey_title: string;
+    survey_description?: string;
+    pages: unknown[];
+    delivery_mode?: "none" | "local" | "r2" | "both";
+  }) {
+    logger.http('[endpoints] POST /surveys/export-document');
+    const response = await httpService.post('/api/v1/surveys/export-document', payload);
+    return response.data as { success: number; doc_link?: string; message: string };
+  }
+
   /** Full regenerate with all survey data — used by the Builder page. */
   static async regenerateSurveyDocument(payload: {
     request_id: string;
@@ -113,6 +128,7 @@ export class ApiEndpoints {
     company_name: string;
     survey_title: string;
     pages: unknown[];
+    delivery_mode?: "none" | "local" | "r2" | "both";
   }) {
     logger.http('[endpoints] POST /surveys/regenerate-document (full)');
     const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
