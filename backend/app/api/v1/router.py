@@ -8,6 +8,7 @@ P2 fix vs current repo state:
   PUT /{id}/settings) is unchanged from the validated repo version.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
