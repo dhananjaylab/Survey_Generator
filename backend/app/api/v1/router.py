@@ -89,7 +89,9 @@ class RegenerateDocumentRequest(BaseModel):
     project_name:       str = Field(..., min_length=1, max_length=200)
     company_name:       str = Field(default="", max_length=200)
     survey_title:       str = Field(default="", max_length=200)
-    survey_description: str = Field(default="", max_length=1000)
+    # This is optional metadata for future export templates; keep it generous
+    # so long business summaries do not trip FastAPI validation.
+    survey_description: str = Field(default="", max_length=5000)
     pages:              list = Field(default_factory=list)
 
 

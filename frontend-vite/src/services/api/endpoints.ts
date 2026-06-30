@@ -112,7 +112,6 @@ export class ApiEndpoints {
     project_name: string;
     company_name: string;
     survey_title: string;
-    survey_description?: string;
     pages: unknown[];
   }) {
     logger.http('[endpoints] POST /surveys/regenerate-document (full)');
@@ -148,19 +147,18 @@ export class ApiEndpoints {
 
   /**
    * Download a file from a pre-signed or absolute URL and trigger a browser save.
-   * Falls back gracefully if the URL is relative.
+   * Public R2 URLs should be opened directly by the browser so we avoid CORS
+   * failures from trying to fetch them with axios first.
    */
   static async downloadFileByUrl(url: string, filename: string): Promise<void> {
     logger.http('[endpoints] GET file by URL: ' + filename);
-    const response = await httpService.get(url, { responseType: 'blob' });
-    const blob = new Blob([response.data as BlobPart]);
-    const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
-    anchor.href = objectUrl;
+    anchor.href = url;
     anchor.download = filename;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
-    URL.revokeObjectURL(objectUrl);
   }
 }

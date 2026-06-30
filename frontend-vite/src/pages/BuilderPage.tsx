@@ -12,7 +12,7 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 export const BuilderPage: React.FC = () => {
   const [selectedQuestionId, setSelectedQuestionId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
-  const { currentSurvey, currentProject, setCurrentSurveyDocLink } = useSurveyStore();
+  const { currentSurvey, currentProject, currentSurveyDocLink, setCurrentSurveyDocLink } = useSurveyStore();
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
@@ -89,9 +89,36 @@ export const BuilderPage: React.FC = () => {
       return;
     }
 
+    const requestId = currentSurvey.id || (currentSurvey as any).request_id;
+    if (!requestId) {
+      addNotification({
+        type: 'error',
+        title: 'Missing Survey ID',
+        message: 'We could not find the survey request ID needed for export.',
+        duration: 3000,
+      });
+      return;
+    }
+
     setIsSaving(true);
 
     try {
+      const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
+
+      // If we already have a usable link, download it directly instead of
+      // queueing a fresh regeneration job. That keeps export from re-running
+      // the survey pipeline unless the user is explicitly changing content.
+      if (currentSurveyDocLink) {
+        await ApiEndpoints.downloadFileByUrl(currentSurveyDocLink, filename);
+        addNotification({
+          type: 'success',
+          title: 'Survey Downloaded',
+          message: `Survey document "${filename}" has been downloaded successfully.`,
+          duration: 3000,
+        });
+        return;
+      }
+
       // Step 1: Regenerate the document with current survey state
       addNotification({
         type: 'info',
@@ -100,10 +127,6 @@ export const BuilderPage: React.FC = () => {
         duration: 3000,
       });
 
-      const requestId = currentSurvey.id || (currentSurvey as any).request_id;
-      if (!requestId) {
-        throw new Error("Missing survey request ID");
-      }
       const backendPages = convertSurveyToBackendFormat();
       
       console.log('📄 Regenerating document with:', {
@@ -114,38 +137,51 @@ export const BuilderPage: React.FC = () => {
         pages_count: backendPages.length,
       });
       
-      const regenerateResponse = await ApiEndpoints.regenerateSurveyDocument({
+      await ApiEndpoints.regenerateSurveyDocument({
         request_id: requestId,
         project_name: currentProject.projectName,
         company_name: currentProject.companyName,
         survey_title: currentSurvey.title,
-        survey_description: currentSurvey.description,
         pages: backendPages,
       });
 
-      if (regenerateResponse.success) {
-        // Update the doc_link with the new one
-        setCurrentSurveyDocLink(regenerateResponse.doc_link);
-        
-        addNotification({
-          type: 'success',
-          title: 'Server Upload Successful',
-          message: 'Survey has been uploaded to cloud storage.',
-          duration: 2000,
-        });
+      addNotification({
+        type: 'success',
+        title: 'Export queued',
+        message: 'Your DOCX is being rebuilt. We will download it once the server finishes.',
+        duration: 3000,
+      });
 
-        // Step 2: Download the regenerated document
-        const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
-        
-        await ApiEndpoints.downloadFileByUrl(regenerateResponse.doc_link, filename);
-        
-        addNotification({
-          type: 'success',
-          title: 'Survey Downloaded',
-          message: `Survey document "${filename}" has been downloaded successfully.`,
-          duration: 3000,
-        });
+      const deadline = Date.now() + 120_000;
+      let docLink = currentSurveyDocLink;
+
+      while (Date.now() < deadline) {
+        const status = await ApiEndpoints.getSurveyStatus(requestId);
+        if (status.status === 'COMPLETED' && status.doc_link) {
+          docLink = status.doc_link;
+          setCurrentSurveyDocLink(status.doc_link);
+          break;
+        }
+
+        if (status.status === 'FAILED') {
+          throw new Error('Survey regeneration failed on the server.');
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
+
+      if (!docLink) {
+        throw new Error('Timed out waiting for the regenerated DOCX to be ready.');
+      }
+
+      await ApiEndpoints.downloadFileByUrl(docLink, filename);
+      
+      addNotification({
+        type: 'success',
+        title: 'Survey Downloaded',
+        message: `Survey document "${filename}" has been downloaded successfully.`,
+        duration: 3000,
+      });
     } catch (error: any) {
       console.error('Save error:', error);
       console.error('Error details:', {
