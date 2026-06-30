@@ -138,6 +138,17 @@ export class ApiEndpoints {
     return response.data;
   }
 
+  static async saveBlobAsFile(blob: Blob, filename: string): Promise<void> {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(objectUrl);
+  }
+
   /**
    * Download a file from a pre-signed or absolute URL and trigger a browser save.
    * Public R2 URLs should be opened directly by the browser so we avoid CORS

@@ -19,7 +19,6 @@ export const BuilderPage: React.FC = () => {
   const [exportMode, setExportMode] = React.useState<'local' | 'r2' | 'both'>('r2');
 
   const convertSurveyToBackendFormat = () => {
-    // Convert frontend Survey format to backend SurveyJS format
     if (!currentSurvey) return [];
     
     const backendPages: any[] = [];
@@ -33,7 +32,6 @@ export const BuilderPage: React.FC = () => {
           isRequired: question.required,
         };
         
-        // Map question type
         if (question.type === 'multiple-choice') {
           element.type = 'radiogroup';
           element.choices = (question.choices || []).map(choice => ({
@@ -54,7 +52,6 @@ export const BuilderPage: React.FC = () => {
           element.minRateDescription = question.lowLabel;
           element.maxRateDescription = question.highLabel;
         } else {
-          // Fallback for unknown types
           element.type = 'comment';
         }
         
@@ -69,7 +66,6 @@ export const BuilderPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    // Validate survey
     if (!currentSurvey?.title) {
       addNotification({
         type: 'error',
@@ -118,7 +114,10 @@ export const BuilderPage: React.FC = () => {
         delivery_mode: exportMode,
       });
 
-      if (exportResponse.doc_link) {
+      if (exportMode === 'local') {
+        const blob = await ApiEndpoints.downloadFile(filename);
+        await ApiEndpoints.saveBlobAsFile(blob, filename);
+      } else if (exportResponse.doc_link) {
         await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
       }
 
@@ -211,7 +210,7 @@ export const BuilderPage: React.FC = () => {
           selectedQuestionId={selectedQuestionId} 
           onSelectQuestion={(q) => {
             setSelectedQuestionId(q.id);
-            setActiveTab('properties'); // Auto switch to properties on selection
+            setActiveTab('properties');
           }} 
         />
         
