@@ -112,6 +112,21 @@ export class ApiEndpoints {
     return response.data as { success: number; doc_link?: string; message: string };
   }
 
+  static async exportLocalDocument(payload: {
+    request_id: string;
+    project_name: string;
+    company_name: string;
+    survey_title: string;
+    survey_description?: string;
+    pages: unknown[];
+  }): Promise<Blob> {
+    logger.http('[endpoints] POST /surveys/export-local');
+    const response = await httpService.post('/api/v1/surveys/export-local', payload, {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
   /** Alias for listSurveys — returns the authenticated user's surveys. */
   static async getUserSurveys() {
     return ApiEndpoints.listSurveys();

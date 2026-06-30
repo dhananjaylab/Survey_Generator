@@ -104,21 +104,30 @@ export const BuilderPage: React.FC = () => {
 
       const backendPages = convertSurveyToBackendFormat();
 
-      const exportResponse = await ApiEndpoints.exportDocument({
-        request_id: requestId,
-        project_name: currentProject.projectName,
-        company_name: currentProject.companyName,
-        survey_title: currentSurvey.title,
-        survey_description: currentSurvey.description,
-        pages: backendPages,
-        delivery_mode: exportMode,
-      });
-
       if (exportMode === 'local') {
-        const blob = await ApiEndpoints.downloadFile(filename);
+        const blob = await ApiEndpoints.exportLocalDocument({
+          request_id: requestId,
+          project_name: currentProject.projectName,
+          company_name: currentProject.companyName,
+          survey_title: currentSurvey.title,
+          survey_description: currentSurvey.description,
+          pages: backendPages,
+        });
         await ApiEndpoints.saveBlobAsFile(blob, filename);
-      } else if (exportResponse.doc_link) {
-        await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
+      } else {
+        const exportResponse = await ApiEndpoints.exportDocument({
+          request_id: requestId,
+          project_name: currentProject.projectName,
+          company_name: currentProject.companyName,
+          survey_title: currentSurvey.title,
+          survey_description: currentSurvey.description,
+          pages: backendPages,
+          delivery_mode: exportMode,
+        });
+
+        if (exportResponse.doc_link) {
+          await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
+        }
       }
 
       addNotification({

@@ -322,6 +322,22 @@ async def delete_survey(
     return {"message": "Survey deleted", "success": 1}
 
 
+@router.post("/export-local")
+@limiter.limit("5/minute")
+async def export_survey_local(
+    request: Request,
+    req: RegenerateDocumentRequest,
+    current_user: str = Depends(get_current_user),
+):
+    doc_io = _build_docx_from_pages(req.project_name, req.company_name, req.pages)
+    filename = f"{req.project_name.replace(' ', '_')}_survey.docx"
+    return StreamingResponse(
+        doc_io,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/export-document")
 @limiter.limit("5/minute")
 async def export_survey_document(
