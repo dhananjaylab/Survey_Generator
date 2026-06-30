@@ -6,8 +6,10 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import settings
+from app.core.logging import get_logger
 
 logger = logging.getLogger(__name__)
+structured_logger = get_logger(__name__)
 
 
 class StorageService:
@@ -17,7 +19,7 @@ class StorageService:
         self.public_url = settings.R2_PUBLIC_URL.rstrip('/')
         self.endpoint_url = f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-        logger.info(
+        structured_logger.info(
             "r2_storage_initializing",
             bucket_name=self.bucket_name,
             public_url=bool(self.public_url),
@@ -40,7 +42,7 @@ class StorageService:
                 ),
             )
         else:
-            logger.warning("r2_storage_not_initialized", bucket_name=self.bucket_name)
+            structured_logger.warning("r2_storage_not_initialized", bucket_name=self.bucket_name)
             self.s3_client = None
 
     def upload_file(self, file_path: str, object_name: str) -> Optional[str]:
@@ -52,13 +54,13 @@ class StorageService:
         :return: Public URL of the uploaded file or None if it fails
         """
         if not self.s3_client:
-            logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:
-            logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
             self.s3_client.upload_file(file_path, self.bucket_name, object_name)
-            logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name, file_path=file_path)
+            structured_logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name, file_path=file_path)
 
             # Prefer the public bucket URL when configured. Otherwise the app
             # can still stream the object back from R2 via the API download route.
@@ -73,15 +75,13 @@ class StorageService:
             if isinstance(e, ClientError):
                 error_code = e.response.get("Error", {}).get("Code")
                 error_message = e.response.get("Error", {}).get("Message", error_message)
-            logger.error(
+            structured_logger.error(
                 "Failed to upload file to R2",
-                extra={
-                    "bucket": self.bucket_name,
-                    "object_name": object_name,
-                    "endpoint_url": self.endpoint_url,
-                    "error_code": error_code,
-                    "error": error_message,
-                },
+                bucket=self.bucket_name,
+                object_name=object_name,
+                endpoint_url=self.endpoint_url,
+                error_code=error_code,
+                error=error_message,
             )
             return None
 
@@ -94,17 +94,17 @@ class StorageService:
         :return: Public URL of the uploaded file or None if it fails
         """
         if not self.s3_client:
-            logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:
-            logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
             # Important: fileobj must be at start.
             if hasattr(file_obj, 'seek'):
                 file_obj.seek(0)
 
             self.s3_client.upload_fileobj(file_obj, self.bucket_name, object_name)
-            logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name)
 
             if self.public_url:
                 return f"{self.public_url}/{object_name}"
@@ -117,15 +117,13 @@ class StorageService:
             if isinstance(e, ClientError):
                 error_code = e.response.get("Error", {}).get("Code")
                 error_message = e.response.get("Error", {}).get("Message", error_message)
-            logger.error(
+            structured_logger.error(
                 "Failed to upload fileobj to R2",
-                extra={
-                    "bucket": self.bucket_name,
-                    "object_name": object_name,
-                    "endpoint_url": self.endpoint_url,
-                    "error_code": error_code,
-                    "error": error_message,
-                },
+                bucket=self.bucket_name,
+                object_name=object_name,
+                endpoint_url=self.endpoint_url,
+                error_code=error_code,
+                error=error_message,
             )
             return None
 
@@ -137,7 +135,7 @@ class StorageService:
         :return: StreamingBody of the object or None if it fails
         """
         if not self.s3_client:
-            logger.error("r2_get_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
+            structured_logger.error("r2_get_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:
