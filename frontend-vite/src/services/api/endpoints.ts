@@ -98,15 +98,6 @@ export class ApiEndpoints {
     return response.data;
   }
 
-  static async regenerateDocument(payload: {
-    request_id: string;
-    project_name: string;
-  }) {
-    logger.http('[endpoints] POST /surveys/regenerate-document');
-    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
-    return response.data;
-  }
-
   static async exportDocument(payload: {
     request_id: string;
     project_name: string;
@@ -119,20 +110,6 @@ export class ApiEndpoints {
     logger.http('[endpoints] POST /surveys/export-document');
     const response = await httpService.post('/api/v1/surveys/export-document', payload);
     return response.data as { success: number; doc_link?: string; message: string };
-  }
-
-  /** Full regenerate with all survey data — used by the Builder page. */
-  static async regenerateSurveyDocument(payload: {
-    request_id: string;
-    project_name: string;
-    company_name: string;
-    survey_title: string;
-    pages: unknown[];
-    delivery_mode?: "none" | "local" | "r2" | "both";
-  }) {
-    logger.http('[endpoints] POST /surveys/regenerate-document (full)');
-    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
-    return response.data as { success: boolean; doc_link: string };
   }
 
   /** Alias for listSurveys — returns the authenticated user's surveys. */

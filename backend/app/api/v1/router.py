@@ -334,11 +334,11 @@ async def export_survey_document(
     local_link = f"/api/v1/files/download/{quote(filename)}"
 
     delivery_mode = (req.delivery_mode or "none").strip().lower()
-    if delivery_mode not in {"none", "local", "r2", "both"}:
-        delivery_mode = "none"
+    if delivery_mode not in {"local", "r2", "both"}:
+        raise HTTPException(status_code=400, detail="delivery_mode must be local, r2, or both")
 
     doc_link: str | None = None
-    if delivery_mode in {"local", "both", "none"}:
+    if delivery_mode in {"local", "both"}:
         questionnaires_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
         questionnaires_dir.mkdir(parents=True, exist_ok=True)
         (questionnaires_dir / filename).write_bytes(doc_io.getvalue())
@@ -353,42 +353,6 @@ async def export_survey_document(
         doc_link = r2_url
 
     return {"success": 1, "message": "Document exported", "doc_link": doc_link, "request_id": req.request_id}
-
-
-@router.post("/regenerate-document")
-@limiter.limit("3/minute")
-async def regenerate_survey_document(
-    request: Request,
-    req: RegenerateDocumentRequest,
-    current_user: str = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    record = (
-        db.query(SurveyRequestRecord)
-        .filter(
-            SurveyRequestRecord.request_id == req.request_id,
-            _survey_access_filter(current_user),
-        )
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="Survey not found")
-
-    from app.tasks.survey_tasks import generate_survey_task
-    generate_survey_task.delay(
-        request_id=req.request_id,
-        data={
-            "project_name": req.project_name,
-            "company_name": req.company_name or record.company_name,
-            "delivery_mode": "local",
-        },
-        llm_model="gpt",
-    )
-    return {
-        "message": "Document regeneration started",
-        "request_id": req.request_id,
-        "success": 1,
-    }
 
 
 @router.put("/{survey_id}/settings")

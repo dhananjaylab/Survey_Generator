@@ -12,7 +12,7 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 export const BuilderPage: React.FC = () => {
   const [selectedQuestionId, setSelectedQuestionId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
-  const { currentSurvey, currentProject, currentSurveyDocLink, setCurrentSurveyDocLink } = useSurveyStore();
+  const { currentSurvey, currentProject } = useSurveyStore();
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
@@ -107,7 +107,7 @@ export const BuilderPage: React.FC = () => {
       const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
 
       const backendPages = convertSurveyToBackendFormat();
-      
+
       const exportResponse = await ApiEndpoints.exportDocument({
         request_id: requestId,
         project_name: currentProject.projectName,
@@ -115,15 +115,11 @@ export const BuilderPage: React.FC = () => {
         survey_title: currentSurvey.title,
         survey_description: currentSurvey.description,
         pages: backendPages,
-        delivery_mode: exportMode === 'local' ? 'local' : exportMode,
+        delivery_mode: exportMode,
       });
 
-      const docLink = exportResponse.doc_link;
-      if (docLink) {
-        if (docLink.startsWith('/api/v1/files/download/')) {
-          setCurrentSurveyDocLink(docLink);
-        }
-        await ApiEndpoints.downloadFileByUrl(docLink, filename);
+      if (exportResponse.doc_link) {
+        await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
       }
 
       addNotification({
