@@ -1,13 +1,11 @@
 """
 Survey generation API router.
 
-Phase 2 change: shared Redis pool injected via get_redis() dependency
-into the four endpoints that call AIService with caching.
-
-Validation fix:
-  - Removed stray `import crypto` / `import os`
-  - Added _survey_access_filter() so legacy rows with username=NULL
-    remain visible to the signed-in user after the auth migration
+P2 fix vs current repo state:
+  list_surveys() used .all() with no cap — restored .limit(50) to prevent
+  a full table scan / huge payload for users with many historical surveys.
+  Everything else (Phase 2 Redis injection, Phase 3 _survey_access_filter,
+  PUT /{id}/settings) is unchanged from the validated repo version.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -246,6 +244,7 @@ async def list_surveys(
         db.query(SurveyRequestRecord)
         .filter(_survey_access_filter(current_user))
         .order_by(SurveyRequestRecord.created_at.desc())
+        .limit(50)   # P2 fix: was unbounded .all() in repo
         .all()
     )
     return {
