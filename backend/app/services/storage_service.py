@@ -17,6 +17,15 @@ class StorageService:
         self.public_url = settings.R2_PUBLIC_URL.rstrip('/')
         self.endpoint_url = f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
+        logger.info(
+            "r2_storage_initializing",
+            bucket_name=self.bucket_name,
+            public_url=bool(self.public_url),
+            account_id_present=bool(settings.R2_ACCOUNT_ID),
+            access_key_present=bool(settings.R2_ACCESS_KEY_ID),
+            secret_key_present=bool(settings.R2_SECRET_ACCESS_KEY),
+        )
+
         # Only initialize the client if we have the necessary credentials.
         if settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID and settings.R2_SECRET_ACCESS_KEY:
             self.s3_client = boto3.client(
@@ -31,7 +40,7 @@ class StorageService:
                 ),
             )
         else:
-            logger.warning("R2 credentials not fully provided in settings. Uploads to R2 will fail.")
+            logger.warning("r2_storage_not_initialized", bucket_name=self.bucket_name)
             self.s3_client = None
 
     def upload_file(self, file_path: str, object_name: str) -> Optional[str]:
@@ -43,12 +52,13 @@ class StorageService:
         :return: Public URL of the uploaded file or None if it fails
         """
         if not self.s3_client:
-            logger.error("S3 client not initialized. Cannot upload to R2.")
+            logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:
+            logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
             self.s3_client.upload_file(file_path, self.bucket_name, object_name)
-            logger.info(f"Successfully uploaded {file_path} to R2 as {object_name}")
+            logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name, file_path=file_path)
 
             # Prefer the public bucket URL when configured. Otherwise the app
             # can still stream the object back from R2 via the API download route.
@@ -84,16 +94,17 @@ class StorageService:
         :return: Public URL of the uploaded file or None if it fails
         """
         if not self.s3_client:
-            logger.error("S3 client not initialized. Cannot upload to R2.")
+            logger.error("r2_upload_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:
+            logger.info("r2_upload_started", bucket_name=self.bucket_name, object_name=object_name)
             # Important: fileobj must be at start.
             if hasattr(file_obj, 'seek'):
                 file_obj.seek(0)
 
             self.s3_client.upload_fileobj(file_obj, self.bucket_name, object_name)
-            logger.info(f"Successfully uploaded fileobj to R2 as {object_name}")
+            logger.info("r2_upload_success", bucket_name=self.bucket_name, object_name=object_name)
 
             if self.public_url:
                 return f"{self.public_url}/{object_name}"
@@ -126,7 +137,7 @@ class StorageService:
         :return: StreamingBody of the object or None if it fails
         """
         if not self.s3_client:
-            logger.error("S3 client not initialized. Cannot get from R2.")
+            logger.error("r2_get_skipped_no_client", bucket_name=self.bucket_name, object_name=object_name)
             return None
 
         try:

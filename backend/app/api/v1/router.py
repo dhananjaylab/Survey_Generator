@@ -362,6 +362,7 @@ async def export_survey_document(
         doc_link = local_link
 
     if delivery_mode in {"r2", "both"}:
+        logger.info("export_r2_requested", request_id=req.request_id, bucket_mode=delivery_mode, filename=filename)
         from app.services.storage_service import StorageService
         storage_service = StorageService()
         r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
