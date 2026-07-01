@@ -134,8 +134,8 @@ export const BuilderPage: React.FC = () => {
         type: 'success',
         title: 'Export complete',
         message: exportMode === 'r2'
-          ? 'Your DOCX has been uploaded to R2.'
-          : 'Your DOCX has been downloaded to your browser.',
+          ? 'Your DOCX has been uploaded to the Cloud.'
+          : 'Your DOCX has been downloaded locally.',
         duration: 3000,
       });
     } catch (error: any) {
@@ -183,14 +183,14 @@ export const BuilderPage: React.FC = () => {
               onClick={() => setExportMode('local')}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'local' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
             >
-              Browser Download
+              Local
             </button>
             <button
               type="button"
               onClick={() => setExportMode('r2')}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'r2' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
             >
-              R2 Upload
+              Cloud
             </button>
           </div>
           <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
