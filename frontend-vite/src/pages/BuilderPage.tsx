@@ -125,7 +125,7 @@ export const BuilderPage: React.FC = () => {
           delivery_mode: exportMode,
         });
 
-        if (exportResponse.doc_link) {
+        if (exportResponse.doc_link && exportMode !== 'r2') {
           await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
         }
       }
@@ -135,7 +135,7 @@ export const BuilderPage: React.FC = () => {
         title: 'Export complete',
         message: exportMode === 'r2'
           ? 'Your DOCX has been uploaded to R2.'
-          : 'Your DOCX has been saved locally.',
+          : 'Your DOCX has been downloaded to your browser.',
         duration: 3000,
       });
     } catch (error: any) {
@@ -183,16 +183,15 @@ export const BuilderPage: React.FC = () => {
               onClick={() => setExportMode('local')}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'local' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
             >
-              Local
+              Browser Download
             </button>
             <button
               type="button"
               onClick={() => setExportMode('r2')}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'r2' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
             >
-              R2
+              R2 Upload
             </button>
-
           </div>
           <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
