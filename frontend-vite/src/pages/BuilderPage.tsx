@@ -16,7 +16,7 @@ export const BuilderPage: React.FC = () => {
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
-  const [exportMode, setExportMode] = React.useState<'local' | 'r2' | 'both'>('r2');
+  const [exportMode, setExportMode] = React.useState<'local' | 'r2'>('r2');
 
   const convertSurveyToBackendFormat = () => {
     if (!currentSurvey) return [];
@@ -135,9 +135,7 @@ export const BuilderPage: React.FC = () => {
         title: 'Export complete',
         message: exportMode === 'r2'
           ? 'Your DOCX has been uploaded to R2.'
-          : exportMode === 'both'
-            ? 'Your DOCX has been saved locally and uploaded to R2.'
-            : 'Your DOCX has been saved locally.',
+          : 'Your DOCX has been saved locally.',
         duration: 3000,
       });
     } catch (error: any) {
@@ -194,13 +192,7 @@ export const BuilderPage: React.FC = () => {
             >
               R2
             </button>
-            <button
-              type="button"
-              onClick={() => setExportMode('both')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'both' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              Both
-            </button>
+
           </div>
           <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

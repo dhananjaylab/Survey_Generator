@@ -127,7 +127,7 @@ class RegenerateDocumentRequest(BaseModel):
     # so long business summaries do not trip FastAPI validation.
     survey_description: str = Field(default="", max_length=5000)
     pages:              list = Field(default_factory=list)
-    delivery_mode:      str = Field(default="none")  # none | local | r2 | both
+    delivery_mode:      str = Field(default="none")  # none | local | r2
 
 
 class SurveySettingsRequest(BaseModel):
@@ -351,17 +351,17 @@ async def export_survey_document(
     local_link = f"/api/v1/files/download/{quote(filename)}"
 
     delivery_mode = (req.delivery_mode or "none").strip().lower()
-    if delivery_mode not in {"local", "r2", "both"}:
-        raise HTTPException(status_code=400, detail="delivery_mode must be local, r2, or both")
+    if delivery_mode not in {"local", "r2"}:
+        raise HTTPException(status_code=400, detail="delivery_mode must be local or r2")
 
     doc_link: str | None = None
-    if delivery_mode in {"local", "both"}:
+    if delivery_mode == "local":
         questionnaires_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
         questionnaires_dir.mkdir(parents=True, exist_ok=True)
         (questionnaires_dir / filename).write_bytes(doc_io.getvalue())
         doc_link = local_link
 
-    if delivery_mode in {"r2", "both"}:
+    elif delivery_mode == "r2":
         logger.info("export_r2_requested", request_id=req.request_id, bucket_mode=delivery_mode, filename=filename)
         from app.services.storage_service import StorageService
         storage_service = StorageService()

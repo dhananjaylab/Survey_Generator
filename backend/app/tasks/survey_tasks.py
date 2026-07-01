@@ -182,7 +182,7 @@ async def async_generate_survey(
         use_case = (data.get("use_case") or "").strip()
         research_objectives = (data.get("research_objectives") or "").strip()
         delivery_mode = (data.get("delivery_mode") or "none").strip().lower()
-        if delivery_mode not in {"local", "r2", "both"}:
+        if delivery_mode not in {"local", "r2"}:
             delivery_mode = "none"
 
         if not business_overview:
@@ -259,14 +259,14 @@ async def async_generate_survey(
         local_doc_link = f"/api/v1/files/download/{quote(filename)}"
         doc_link: str | None = None
 
-        if delivery_mode in {"local", "both"}:
+        if delivery_mode == "local":
             questionnaires_dir.mkdir(parents=True, exist_ok=True)
             local_path = questionnaires_dir / filename
             local_path.write_bytes(doc_io.getvalue())
             logger.info("local_docx_saved", request_id=request_id, local_path=str(local_path))
             doc_link = local_doc_link
 
-        if delivery_mode in {"r2", "both"}:
+        elif delivery_mode == "r2":
             await publish_progress(request_id, "UPLOADING_DOCUMENT")
             try:
                 from app.services.storage_service import StorageService
@@ -283,10 +283,7 @@ async def async_generate_survey(
 
             except Exception as exc:
                 logger.warning("r2_upload_exception", request_id=request_id, error=str(exc))
-                if delivery_mode == "r2":
-                    raise
-                if doc_link is None:
-                    doc_link = local_doc_link
+                raise
 
         # When delivery_mode is "none", we intentionally skip file persistence.
 

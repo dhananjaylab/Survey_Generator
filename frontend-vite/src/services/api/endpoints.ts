@@ -73,7 +73,7 @@ export class ApiEndpoints {
     use_case: string;
     llm_model?: string;
     use_web_search?: boolean;
-    delivery_mode?: "none" | "local" | "r2" | "both";
+    delivery_mode?: "none" | "local" | "r2";
   }) {
     logger.http('[endpoints] POST /surveys/generate');
     const response = await httpService.post('/api/v1/surveys/generate', payload);
@@ -105,7 +105,7 @@ export class ApiEndpoints {
     survey_title: string;
     survey_description?: string;
     pages: unknown[];
-    delivery_mode?: "none" | "local" | "r2" | "both";
+    delivery_mode?: "none" | "local" | "r2";
   }) {
     logger.http('[endpoints] POST /surveys/export-document');
     const response = await httpService.post('/api/v1/surveys/export-document', payload);
