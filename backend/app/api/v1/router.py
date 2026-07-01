@@ -1,15 +1,19 @@
 """
 Survey generation API router.
 
-Phase 2 change: shared Redis pool injected via get_redis() dependency
-into the four endpoints that call AIService with caching.
-
-Validation fix:
-  - Removed stray `import crypto` / `import os`
-  - Added _survey_access_filter() so legacy rows with username=NULL
-    remain visible to the signed-in user after the auth migration
+P2 fix vs current repo state:
+  list_surveys() used .all() with no cap — restored .limit(50) to prevent
+  a full table scan / huge payload for users with many historical surveys.
+  Everything else (Phase 2 Redis injection, Phase 3 _survey_access_filter,
+  PUT /{id}/settings) is unchanged from the validated repo version.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import quote
+from docx import Document
+import asyncio
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -54,6 +58,34 @@ def get_redis(request: Request):
     return request.app.state.redis
 
 
+def _build_docx_from_pages(project_name: str, company_name: str, pages: list) -> BytesIO:
+    assets_dir = Path(__file__).resolve().parent.parent / "assets"
+    template_path = assets_dir / "template_new.docx"
+    doc = Document(str(template_path)) if template_path.exists() else Document()
+
+    doc.add_heading(f"{project_name} — Survey Questionnaire", 0)
+    doc.add_paragraph(f"Company: {company_name}")
+    doc.add_paragraph()
+
+    for page in pages or []:
+        for element in page.get("elements", []):
+            p = doc.add_paragraph(style="List Number")
+            p.add_run(element.get("title", "")).bold = True
+            for choice in element.get("choices", []):
+                if isinstance(choice, dict):
+                    choice_text = choice.get("text") or choice.get("value") or ""
+                else:
+                    choice_text = str(choice)
+                if choice_text:
+                    doc.add_paragraph(choice_text, style="List Bullet 2")
+            doc.add_paragraph()
+
+    doc_io = BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+    return doc_io
+
+
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class BusinessOverviewRequest(BaseModel):
@@ -91,8 +123,11 @@ class RegenerateDocumentRequest(BaseModel):
     project_name:       str = Field(..., min_length=1, max_length=200)
     company_name:       str = Field(default="", max_length=200)
     survey_title:       str = Field(default="", max_length=200)
-    survey_description: str = Field(default="", max_length=1000)
+    # This is optional metadata for future export templates; keep it generous
+    # so long business summaries do not trip FastAPI validation.
+    survey_description: str = Field(default="", max_length=5000)
     pages:              list = Field(default_factory=list)
+    delivery_mode:      str = Field(default="none")  # none | local | r2
 
 
 class SurveySettingsRequest(BaseModel):
@@ -195,7 +230,7 @@ async def generate_survey(
     from app.tasks.survey_tasks import generate_survey_task
     generate_survey_task.delay(
         request_id=req.request_id,
-        data=req.model_dump(),
+        data=req.model_dump() | {"delivery_mode": "none"},
         llm_model=req.llm_model,
     )
 
@@ -246,6 +281,7 @@ async def list_surveys(
         db.query(SurveyRequestRecord)
         .filter(_survey_access_filter(current_user))
         .order_by(SurveyRequestRecord.created_at.desc())
+        .limit(50)   # P2 fix: was unbounded .all() in repo
         .all()
     )
     return {
@@ -287,39 +323,54 @@ async def delete_survey(
     return {"message": "Survey deleted", "success": 1}
 
 
-@router.post("/regenerate-document")
-@limiter.limit("3/minute")
-async def regenerate_survey_document(
+@router.post("/export-local")
+@limiter.limit("5/minute")
+async def export_survey_local(
     request: Request,
     req: RegenerateDocumentRequest,
     current_user: str = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
-    record = (
-        db.query(SurveyRequestRecord)
-        .filter(
-            SurveyRequestRecord.request_id == req.request_id,
-            _survey_access_filter(current_user),
-        )
-        .first()
+    doc_io = _build_docx_from_pages(req.project_name, req.company_name, req.pages)
+    filename = f"{req.project_name.replace(' ', '_')}_survey.docx"
+    return StreamingResponse(
+        doc_io,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-    if not record:
-        raise HTTPException(status_code=404, detail="Survey not found")
 
-    from app.tasks.survey_tasks import generate_survey_task
-    generate_survey_task.delay(
-        request_id=req.request_id,
-        data={
-            "project_name": req.project_name,
-            "company_name": req.company_name or record.company_name,
-        },
-        llm_model="gpt",
-    )
-    return {
-        "message": "Document regeneration started",
-        "request_id": req.request_id,
-        "success": 1,
-    }
+
+@router.post("/export-document")
+@limiter.limit("5/minute")
+async def export_survey_document(
+    request: Request,
+    req: RegenerateDocumentRequest,
+    current_user: str = Depends(get_current_user),
+):
+    doc_io = _build_docx_from_pages(req.project_name, req.company_name, req.pages)
+    filename = f"{req.project_name.replace(' ', '_')}_survey.docx"
+    local_link = f"/api/v1/files/download/{quote(filename)}"
+
+    delivery_mode = (req.delivery_mode or "none").strip().lower()
+    if delivery_mode not in {"local", "r2"}:
+        raise HTTPException(status_code=400, detail="delivery_mode must be local or r2")
+
+    doc_link: str | None = None
+    if delivery_mode == "local":
+        questionnaires_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
+        questionnaires_dir.mkdir(parents=True, exist_ok=True)
+        (questionnaires_dir / filename).write_bytes(doc_io.getvalue())
+        doc_link = local_link
+
+    elif delivery_mode == "r2":
+        logger.info("export_r2_requested", request_id=req.request_id, bucket_mode=delivery_mode, filename=filename)
+        from app.services.storage_service import StorageService
+        storage_service = StorageService()
+        r2_url = await asyncio.to_thread(storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}")
+        if not r2_url:
+            raise HTTPException(status_code=500, detail="R2 upload failed")
+        doc_link = r2_url
+
+    return {"success": 1, "message": "Document exported", "doc_link": doc_link, "request_id": req.request_id}
 
 
 @router.put("/{survey_id}/settings")

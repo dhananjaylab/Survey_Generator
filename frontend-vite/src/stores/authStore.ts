@@ -1,15 +1,22 @@
 /**
- * Auth store — Phase 3 update.
+ * Auth store — Phase 3 version.
  *
- * Phase 3 change: logout() now hits /api/v1/auth/logout to blocklist the
- * refresh token server-side, preventing replay even if the token is still
- * within its 72-hour TTL.  Local state is cleared regardless of whether
- * the network call succeeds (fail-open for UX).
+ * Phase 3 change:
+ *   logout() fires POST /api/v1/auth/logout with the current refresh_token
+ *   so the server can blocklist its jti.  Uses a bare axios call (not
+ *   httpService) to bypass the 401 interceptor — interceptor would try to
+ *   silently refresh a token we are intentionally discarding.
+ *   Fail-open: local state is always cleared regardless of network outcome.
  *
  * Phase 2 retained:
- *  - Single 'auth' localStorage key
- *  - Migration shim from old 'auth-store' key
- *  - setTokens() for silent refresh interceptor
+ *   - Single 'auth' localStorage key (Zustand persist)
+ *   - One-time migration shim from old 'auth-store' / 'auth-tokens' keys
+ *   - setTokens() exposed for the HTTP interceptor's silent refresh
+ *   - No AuthService layer — calls ApiEndpoints directly
+ *
+ * Phase 1 fix retained:
+ *   - Removed broken /api/v1/users/me call on every page load
+ *   - access_token (snake_case) throughout
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -21,7 +28,8 @@ import { logger } from '@/utils/logger';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
-// ── One-time migration ────────────────────────────────────────────────────────
+// ── One-time migration: old keys → new single 'auth' key ─────────────────────
+// Remove this block after 7 days post-deploy (all old tokens will have expired).
 try {
   const oldRaw = localStorage.getItem('auth-store');
   if (oldRaw && !localStorage.getItem('auth')) {
@@ -35,16 +43,18 @@ try {
     localStorage.removeItem('auth-tokens');
   }
 } catch {
-  // Non-fatal
+  // Non-fatal — user will be asked to log in again
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
-      tokens: null,
+      tokens:          null,
       isAuthenticated: false,
-      isLoading: false,
-      error: null,
+      isLoading:       false,
+      error:           null,
+
+      // ── Actions ─────────────────────────────────────────────────────────────
 
       login: async (credentials: LoginCredentials): Promise<void> => {
         set({ isLoading: true, error: null });
@@ -75,26 +85,40 @@ export const useAuthStore = create<AuthState>()(
       logout: (): void => {
         const { tokens } = get();
 
-        // Phase 3: notify server to blocklist the refresh token.
-        // Use a bare axios call (not httpService) to avoid the 401 interceptor
-        // triggering a refresh attempt on the way out.
+        // Phase 3: tell the server to blocklist the refresh token's jti.
+        // Fire-and-forget — we clear local state regardless of outcome.
+        // Bare axios is used intentionally to avoid the httpService interceptor
+        // triggering a /auth/refresh call for a token we are discarding.
         if (tokens?.refresh_token) {
           axios
             .post(
               `${BASE_URL}/api/v1/auth/logout`,
               { refresh_token: tokens.refresh_token },
-              { headers: { Authorization: `Bearer ${tokens.access_token}` } }
+              {
+                headers: {
+                  Authorization: `Bearer ${tokens.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+              }
             )
             .catch((err) => {
-              logger.warn('[auth] server-side logout failed (token may still be valid briefly)', err);
+              logger.warn(
+                '[auth] server-side logout call failed — token may still be valid briefly',
+                err?.response?.status
+              );
             });
         }
 
-        // Always clear client state regardless of network outcome
+        // Always clear client state immediately, regardless of server response.
         set({ tokens: null, isAuthenticated: false, error: null });
         logger.debug('[auth] logged out');
+        // Zustand's persist middleware will clear the 'auth' localStorage key automatically.
       },
 
+      /**
+       * Called by the HTTP interceptor after a successful silent refresh.
+       * Stores new tokens without touching isLoading or isAuthenticated.
+       */
       setTokens: (tokens: AuthTokens): void => {
         set({ tokens, isAuthenticated: true });
       },
@@ -104,7 +128,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'auth',
+      name: 'auth',                               // single localStorage key
       partialize: (state) => ({ tokens: state.tokens }),
       onRehydrateStorage: () => (state) => {
         if (state?.tokens) {

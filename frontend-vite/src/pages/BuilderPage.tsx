@@ -12,13 +12,13 @@ import { ApiEndpoints } from '@/services/api/endpoints';
 export const BuilderPage: React.FC = () => {
   const [selectedQuestionId, setSelectedQuestionId] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
-  const { currentSurvey, currentProject, setCurrentSurveyDocLink } = useSurveyStore();
+  const { currentSurvey, currentProject } = useSurveyStore();
   const { addNotification } = useUIStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<'properties' | 'triggers'>('properties');
+  const [exportMode, setExportMode] = React.useState<'local' | 'r2'>('r2');
 
   const convertSurveyToBackendFormat = () => {
-    // Convert frontend Survey format to backend SurveyJS format
     if (!currentSurvey) return [];
     
     const backendPages: any[] = [];
@@ -32,7 +32,6 @@ export const BuilderPage: React.FC = () => {
           isRequired: question.required,
         };
         
-        // Map question type
         if (question.type === 'multiple-choice') {
           element.type = 'radiogroup';
           element.choices = (question.choices || []).map(choice => ({
@@ -53,7 +52,6 @@ export const BuilderPage: React.FC = () => {
           element.minRateDescription = question.lowLabel;
           element.maxRateDescription = question.highLabel;
         } else {
-          // Fallback for unknown types
           element.type = 'comment';
         }
         
@@ -68,7 +66,6 @@ export const BuilderPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    // Validate survey
     if (!currentSurvey?.title) {
       addNotification({
         type: 'error',
@@ -89,63 +86,58 @@ export const BuilderPage: React.FC = () => {
       return;
     }
 
+    const requestId = currentSurvey.id || (currentSurvey as any).request_id;
+    if (!requestId) {
+      addNotification({
+        type: 'error',
+        title: 'Missing Survey ID',
+        message: 'We could not find the survey request ID needed for export.',
+        duration: 3000,
+      });
+      return;
+    }
+
     setIsSaving(true);
 
     try {
-      // Step 1: Regenerate the document with current survey state
+      const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
+
+      const backendPages = convertSurveyToBackendFormat();
+
+      if (exportMode === 'local') {
+        const blob = await ApiEndpoints.exportLocalDocument({
+          request_id: requestId,
+          project_name: currentProject.projectName,
+          company_name: currentProject.companyName,
+          survey_title: currentSurvey.title,
+          survey_description: currentSurvey.description,
+          pages: backendPages,
+        });
+        await ApiEndpoints.saveBlobAsFile(blob, filename);
+      } else {
+        const exportResponse = await ApiEndpoints.exportDocument({
+          request_id: requestId,
+          project_name: currentProject.projectName,
+          company_name: currentProject.companyName,
+          survey_title: currentSurvey.title,
+          survey_description: currentSurvey.description,
+          pages: backendPages,
+          delivery_mode: exportMode,
+        });
+
+        if (exportResponse.doc_link && exportMode !== 'r2') {
+          await ApiEndpoints.downloadFileByUrl(exportResponse.doc_link, filename);
+        }
+      }
+
       addNotification({
-        type: 'info',
-        title: 'Generating Document',
-        message: 'Creating document with your current survey changes...',
+        type: 'success',
+        title: 'Export complete',
+        message: exportMode === 'r2'
+          ? 'Your DOCX has been uploaded to the Cloud.'
+          : 'Your DOCX has been downloaded locally.',
         duration: 3000,
       });
-
-      const requestId = currentSurvey.id || (currentSurvey as any).request_id;
-      if (!requestId) {
-        throw new Error("Missing survey request ID");
-      }
-      const backendPages = convertSurveyToBackendFormat();
-      
-      console.log('📄 Regenerating document with:', {
-        request_id: requestId,
-        project_name: currentProject.projectName,
-        company_name: currentProject.companyName,
-        survey_title: currentSurvey.title,
-        pages_count: backendPages.length,
-      });
-      
-      const regenerateResponse = await ApiEndpoints.regenerateSurveyDocument({
-        request_id: requestId,
-        project_name: currentProject.projectName,
-        company_name: currentProject.companyName,
-        survey_title: currentSurvey.title,
-        survey_description: currentSurvey.description,
-        pages: backendPages,
-      });
-
-      if (regenerateResponse.success) {
-        // Update the doc_link with the new one
-        setCurrentSurveyDocLink(regenerateResponse.doc_link);
-        
-        addNotification({
-          type: 'success',
-          title: 'Server Upload Successful',
-          message: 'Survey has been uploaded to cloud storage.',
-          duration: 2000,
-        });
-
-        // Step 2: Download the regenerated document
-        const filename = `${currentSurvey.title.replace(/\s+/g, '_')}_survey.docx`;
-        
-        await ApiEndpoints.downloadFileByUrl(regenerateResponse.doc_link, filename);
-        
-        addNotification({
-          type: 'success',
-          title: 'Survey Downloaded',
-          message: `Survey document "${filename}" has been downloaded successfully.`,
-          duration: 3000,
-        });
-      }
     } catch (error: any) {
       console.error('Save error:', error);
       console.error('Error details:', {
@@ -185,6 +177,22 @@ export const BuilderPage: React.FC = () => {
             </svg>
             <span>Preview</span>
           </Button>
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setExportMode('local')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'local' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportMode('r2')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${exportMode === 'r2' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Cloud
+            </button>
+          </div>
           <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex items-center space-x-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -202,7 +210,7 @@ export const BuilderPage: React.FC = () => {
           selectedQuestionId={selectedQuestionId} 
           onSelectQuestion={(q) => {
             setSelectedQuestionId(q.id);
-            setActiveTab('properties'); // Auto switch to properties on selection
+            setActiveTab('properties');
           }} 
         />
         

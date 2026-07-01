@@ -73,6 +73,7 @@ export class ApiEndpoints {
     use_case: string;
     llm_model?: string;
     use_web_search?: boolean;
+    delivery_mode?: "none" | "local" | "r2";
   }) {
     logger.http('[endpoints] POST /surveys/generate');
     const response = await httpService.post('/api/v1/surveys/generate', payload);
@@ -97,27 +98,33 @@ export class ApiEndpoints {
     return response.data;
   }
 
-  static async regenerateDocument(payload: {
-    request_id: string;
-    project_name: string;
-  }) {
-    logger.http('[endpoints] POST /surveys/regenerate-document');
-    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
-    return response.data;
-  }
-
-  /** Full regenerate with all survey data — used by the Builder page. */
-  static async regenerateSurveyDocument(payload: {
+  static async exportDocument(payload: {
     request_id: string;
     project_name: string;
     company_name: string;
     survey_title: string;
     survey_description?: string;
     pages: unknown[];
+    delivery_mode?: "none" | "local" | "r2";
   }) {
-    logger.http('[endpoints] POST /surveys/regenerate-document (full)');
-    const response = await httpService.post('/api/v1/surveys/regenerate-document', payload);
-    return response.data as { success: boolean; doc_link: string };
+    logger.http('[endpoints] POST /surveys/export-document');
+    const response = await httpService.post('/api/v1/surveys/export-document', payload);
+    return response.data as { success: number; doc_link?: string; message: string };
+  }
+
+  static async exportLocalDocument(payload: {
+    request_id: string;
+    project_name: string;
+    company_name: string;
+    survey_title: string;
+    survey_description?: string;
+    pages: unknown[];
+  }): Promise<Blob> {
+    logger.http('[endpoints] POST /surveys/export-local');
+    const response = await httpService.post('/api/v1/surveys/export-local', payload, {
+      responseType: 'blob',
+    });
+    return response.data;
   }
 
   /** Alias for listSurveys — returns the authenticated user's surveys. */
@@ -146,14 +153,7 @@ export class ApiEndpoints {
     return response.data;
   }
 
-  /**
-   * Download a file from a pre-signed or absolute URL and trigger a browser save.
-   * Falls back gracefully if the URL is relative.
-   */
-  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
-    logger.http('[endpoints] GET file by URL: ' + filename);
-    const response = await httpService.get(url, { responseType: 'blob' });
-    const blob = new Blob([response.data as BlobPart]);
+  static async saveBlobAsFile(blob: Blob, filename: string): Promise<void> {
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = objectUrl;
@@ -162,5 +162,22 @@ export class ApiEndpoints {
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(objectUrl);
+  }
+
+  /**
+   * Download a file from a pre-signed or absolute URL and trigger a browser save.
+   * Public R2 URLs should be opened directly by the browser so we avoid CORS
+   * failures from trying to fetch them with axios first.
+   */
+  static async downloadFileByUrl(url: string, filename: string): Promise<void> {
+    logger.http('[endpoints] GET file by URL: ' + filename);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
   }
 }

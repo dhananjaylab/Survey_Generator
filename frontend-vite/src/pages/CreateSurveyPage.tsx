@@ -356,6 +356,7 @@ export const CreateSurveyPage: React.FC = () => {
         use_case: useCase.trim(),
         llm_model: llmModel,
         use_web_search: useWebSearch,
+        delivery_mode: "none",
       });
 
       // Connect WebSocket after confirming the task was accepted

@@ -4,8 +4,7 @@ Celery tasks for asynchronous survey generation.
 Key changes from original:
   1. Removed autoretry_for / retry_backoff decorator args — manual self.retry()
      is the sole retry mechanism to prevent double-firing.
-  2. Document export stays off local disk; uploads go to R2 first and the
-     app only persists a link once a usable R2-backed URL is available.
+  2. Documents are saved locally only when requested, then optionally uploaded to R2.
   3. Survey is only marked COMPLETED after a usable doc_link is confirmed.
 """
 import json
@@ -13,6 +12,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, Any
+from urllib.parse import quote
 
 import asyncio
 from docx import Document
@@ -181,6 +181,9 @@ async def async_generate_survey(
         business_overview = (data.get("business_overview") or "").strip()
         use_case = (data.get("use_case") or "").strip()
         research_objectives = (data.get("research_objectives") or "").strip()
+        delivery_mode = (data.get("delivery_mode") or "none").strip().lower()
+        if delivery_mode not in {"local", "r2"}:
+            delivery_mode = "none"
 
         if not business_overview:
             await publish_progress(request_id, "GENERATING_BUSINESS_OVERVIEW")
@@ -250,27 +253,39 @@ async def async_generate_survey(
         doc.save(doc_io)
         doc_io.seek(0)
 
-        # ── 3. Upload to R2 ─────────────────────────────────────────────────
-        await publish_progress(request_id, "UPLOADING_DOCUMENT")
+        # ── 3. Save/upload only when explicitly requested ───────────────────
         filename = f"{project_name.replace(' ', '_')}_questionnaire_{request_id}.docx"
+        questionnaires_dir = Path(__file__).resolve().parent.parent.parent / "questionnaires"
+        local_doc_link = f"/api/v1/files/download/{quote(filename)}"
         doc_link: str | None = None
 
-        try:
-            from app.services.storage_service import StorageService
-            storage_service = StorageService()
-            r2_url = await asyncio.to_thread(
-                storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}"
-            )
+        if delivery_mode == "local":
+            questionnaires_dir.mkdir(parents=True, exist_ok=True)
+            local_path = questionnaires_dir / filename
+            local_path.write_bytes(doc_io.getvalue())
+            logger.info("local_docx_saved", request_id=request_id, local_path=str(local_path))
+            doc_link = local_doc_link
 
-            if r2_url:
-                doc_link = r2_url
-                logger.info("r2_upload_success", request_id=request_id, doc_link=doc_link)
-            else:
-                raise RuntimeError("R2 upload failed and no download URL was returned")
+        elif delivery_mode == "r2":
+            await publish_progress(request_id, "UPLOADING_DOCUMENT")
+            try:
+                from app.services.storage_service import StorageService
+                storage_service = StorageService()
+                r2_url = await asyncio.to_thread(
+                    storage_service.upload_fileobj, doc_io, f"questionnaires/{filename}"
+                )
 
-        except Exception as exc:
-            logger.warning("r2_upload_exception", request_id=request_id, error=str(exc))
-            raise
+                if r2_url:
+                    doc_link = r2_url
+                    logger.info("r2_upload_success", request_id=request_id, doc_link=doc_link)
+                else:
+                    raise RuntimeError("R2 upload failed and no download URL was returned")
+
+            except Exception as exc:
+                logger.warning("r2_upload_exception", request_id=request_id, error=str(exc))
+                raise
+
+        # When delivery_mode is "none", we intentionally skip file persistence.
 
         # ── 4. Build SurveyJS pages ───────────────────────────────────────────
         pages = [{
